@@ -45,7 +45,7 @@ class Ticker:
             ensure_default_fonts(self.font_manager)
         else:
             self.font_manager = font_manager
-        self.image = image or ImageDrawer(width, height, self.font_manager)
+        self.image = image or ImageDrawer(width, height, font_manager=self.font_manager)
         self.inverted = config.main.inverted
         self.orientation = config.main.orientation
 

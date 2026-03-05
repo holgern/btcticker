@@ -38,10 +38,10 @@ class MainConfig(BaseModel):
 class FontsConfig(BaseModel):
     font_buttom: str = "Audiowide-Regular.ttf"
     font_console: str = "ZenDots-Regular.ttf"
-    font_big: str = "BigShouldersDisplay-SemiBold.ttf"
-    font_side: str = "Roboto-Medium.ttf"
+    font_big: str = "BigShouldersDisplay[wght].ttf"
+    font_side: str = "Roboto[wdth,wght].ttf"
     font_side_size: int = 20
-    font_top: str = "PixelSplitter-Bold.ttf"
+    font_top: str = "Quantico-Bold.ttf"
     font_top_size: int = 18
     font_fee: str = "Audiowide-Regular.ttf"
     font_fee_size: int = 14

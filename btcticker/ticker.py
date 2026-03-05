@@ -1,5 +1,4 @@
 import math
-import os
 import time
 from datetime import datetime
 
@@ -9,6 +8,7 @@ from piltext import FontManager, ImageDrawer, TextGrid
 
 from btcticker.chart import makeCandle, makeSpark
 from btcticker.config import Config
+from btcticker.font_sources import ensure_default_fonts
 from btcticker.mempool import Mempool
 
 
@@ -37,12 +37,14 @@ class Ticker:
             enable_ohlc=config.main.enable_ohlc,
         )
 
-        fontdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fonts")
-        self.font_manager = font_manager or FontManager(
-            fontdir,
-            default_font_size=20,
-            default_font_name="Roboto-Medium",
-        )
+        if font_manager is None:
+            self.font_manager = FontManager(
+                default_font_size=20,
+                default_font_name=config.fonts.font_side,
+            )
+            ensure_default_fonts(self.font_manager)
+        else:
+            self.font_manager = font_manager
         self.image = image or ImageDrawer(width, height, self.font_manager)
         self.inverted = config.main.inverted
         self.orientation = config.main.orientation

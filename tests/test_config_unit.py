@@ -53,3 +53,33 @@ def test_config_raises_when_required_section_is_missing(tmp_path):
 
     with pytest.raises(ConfigurationException, match="Missing section: Fonts"):
         Config(path=str(config_path))
+
+
+def test_config_reads_new_provider_fields_and_normalizes_values(tmp_path):
+    config_path = tmp_path / "config.ini"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            [Main]
+            fiat = usd
+            price_provider = PYCCXT
+            exchange = KRAKEN
+            symbol = btc/usd
+            usd_symbol = btc/usdt
+            ccxt_timeout = 45000
+            price_refresh_seconds = 12
+
+            [Fonts]
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    config = Config(path=str(config_path))
+
+    assert config.main.price_provider == "pyccxt"
+    assert config.main.exchange == "kraken"
+    assert config.main.symbol == "BTC/USD"
+    assert config.main.usd_symbol == "BTC/USDT"
+    assert config.main.ccxt_timeout == 45000
+    assert config.main.price_refresh_seconds == 12

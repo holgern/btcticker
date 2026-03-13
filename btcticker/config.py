@@ -1,6 +1,6 @@
 from configparser import ConfigParser
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 
 class ConfigurationException(ValueError):
@@ -8,6 +8,8 @@ class ConfigurationException(ValueError):
 
 
 class MainConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     fiat: str = "eur"
     mode_list: str = "fiat,height,satfiat,moscowtime,usd"
     start_mode_ind: int = 0
@@ -21,7 +23,13 @@ class MainConfig(BaseModel):
     loglevel: str = "WARNING"
     orientation: int = 0
     interval: str = "1h"
-    price_service: str = "coingecko"
+    price_provider: str = "pyccxt"
+    exchange: str = "kraken"
+    symbol: str = ""
+    usd_symbol: str = "BTC/USD"
+    ccxt_timeout: int = 30000
+    price_refresh_seconds: int = 10
+    price_service: str | None = None
     enable_ohlc: bool = True
     inverted: bool = False
     show_block_height: bool = False
@@ -34,8 +42,32 @@ class MainConfig(BaseModel):
     show_best_fees: bool = True
     show_block_time: bool = True
 
+    @field_validator("fiat", "price_provider", "exchange", mode="before")
+    @classmethod
+    def _normalize_lowercase(cls, value):
+        if value is None:
+            return value
+        return str(value).strip().lower()
+
+    @field_validator("symbol", "usd_symbol", mode="before")
+    @classmethod
+    def _normalize_symbol(cls, value):
+        if value is None:
+            return ""
+        return str(value).strip().upper()
+
+    @field_validator("price_service", mode="before")
+    @classmethod
+    def _normalize_price_service(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        return normalized or None
+
 
 class FontsConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     font_buttom: str = "Audiowide-Regular.ttf"
     font_console: str = "ZenDots-Regular.ttf"
     font_big: str = "BigShouldersDisplay[wght].ttf"
@@ -56,6 +88,9 @@ class Config:
 
         self.main = self._load_section("Main", MainConfig)
         self.fonts = self._load_section("Fonts", FontsConfig)
+
+    def has_option(self, section_name, option_name):
+        return self.__config.has_option(section_name, option_name)
 
     def _load_section(self, section_name, model):
         if section_name not in self.__config:

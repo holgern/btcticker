@@ -33,8 +33,8 @@ def _load_ticker_module(monkeypatch):
         def get_timeseries_list(self):
             return [0.0]
 
-    fake_price_mod.Price = StubPrice
-    fake_price_pkg.price = fake_price_mod
+    setattr(fake_price_mod, "Price", StubPrice)
+    setattr(fake_price_pkg, "price", fake_price_mod)
     monkeypatch.setitem(sys.modules, "btcpriceticker", fake_price_pkg)
     monkeypatch.setitem(sys.modules, "btcpriceticker.price", fake_price_mod)
 
@@ -80,14 +80,14 @@ def _load_ticker_module(monkeypatch):
         def get_grid(self, *args, **kwargs):
             return (0, 0), (10, 10)
 
-    fake_piltext.FontManager = StubFontManager
-    fake_piltext.ImageDrawer = StubImageDrawer
-    fake_piltext.TextGrid = StubTextGrid
+    setattr(fake_piltext, "FontManager", StubFontManager)
+    setattr(fake_piltext, "ImageDrawer", StubImageDrawer)
+    setattr(fake_piltext, "TextGrid", StubTextGrid)
     monkeypatch.setitem(sys.modules, "piltext", fake_piltext)
 
     fake_chart = types.ModuleType("btcticker.chart")
-    fake_chart.makeCandle = lambda *args, **kwargs: "candle-image"
-    fake_chart.makeSpark = lambda *args, **kwargs: "spark-image"
+    setattr(fake_chart, "makeCandle", lambda *args, **kwargs: "candle-image")
+    setattr(fake_chart, "makeSpark", lambda *args, **kwargs: "spark-image")
     monkeypatch.setitem(sys.modules, "btcticker.chart", fake_chart)
 
     sys.modules.pop("btcticker.ticker", None)
@@ -187,6 +187,142 @@ def test_get_current_price_variants(ticker_module):
     assert ticker.get_current_price("sat_per_usd", shorten=False) == "2295 sat/$"
 
 
+@pytest.mark.parametrize(
+    ("generator_name", "mode", "expected"),
+    [
+        (
+            "generate_all",
+            "fiat",
+            [
+                "840000 - 9:30 -",
+                "low: 1.2 med: 2.3 high: 3.4",
+                "$43567",
+                "2295 /$",
+                "/$2400",
+                "$ ",
+                "3day : +3.2%",
+                "43567",
+            ],
+        ),
+        (
+            "generate_all",
+            "newblock",
+            [
+                "$43567 - 9:30 -",
+                "low: 1.2 med: 2.3 high: 3.4",
+                "3 blks 321000 txs",
+                "672 blk -12.5%",
+                "840000",
+                " ",
+                " ",
+                " ",
+            ],
+        ),
+        (
+            "generate_fiat",
+            "height",
+            [
+                "$43567 -",
+                "low: 1.2 med: 2.3 high: 3.4",
+                "lb -",
+                "672 blk",
+                "/$2400",
+                " ",
+                "3day : +3.2%",
+                "840000",
+            ],
+        ),
+        (
+            "generate_fiat_height",
+            "usd",
+            ["840000", "Fees: L 1.2 M 2.3 H 3.4", "672 blk -12.5 %", "/$2400", "43567"],
+        ),
+        (
+            "generate_big_one_row",
+            "satfiat",
+            ["840000 - 672 -", "/$ Fees: L 1.2 M 2.3 H 3.4", "2400"],
+        ),
+        ("generate_big_two_rows", "moscowtime", ["sat/$", "$43,567 - 9:30 -", "2295"]),
+        ("generate_one_number", "fiat", ["$43567", "Market price of bitcoin"]),
+        (
+            "generate_mempool",
+            "usd",
+            ["43567", "672 blk -12.5 %", "$43567 - 840000 - lb -", "1.2 2.3 3.4"],
+        ),
+        (
+            "generate_ohlc",
+            "satfiat",
+            [
+                "840000",
+                "(",
+                "Fees: L 1.2 M 2.3 H 3.4",
+                "672 blk -12.54%",
+                "$43567 - $43567 - 2295 /$",
+                "/$   3d : +3.2%",
+                "2400",
+            ],
+        ),
+    ],
+)
+def test_layout_generators_cover_mode_matrix(
+    ticker_module, generator_name, mode, expected
+):
+    ticker, _ = _make_ticker(ticker_module)
+
+    actual = getattr(ticker, generator_name)(mode)
+
+    assert len(actual) == len(expected)
+    for actual_part, expected_part in zip(actual, expected):
+        assert expected_part in actual_part
+
+
+def test_layout_generators_toggle_block_time_and_fee_modes(ticker_module):
+    ticker, _ = _make_ticker(
+        ticker_module,
+        show_best_fees=False,
+        show_block_time=True,
+    )
+
+    assert ticker.generate_all("fiat")[0].startswith("840000-")
+    assert ticker.generate_all("fiat")[1] == "1.1-2.2-3.3-4.4-5.5-6.6-7.7"
+    assert ticker.generate_fiat("fiat")[0].startswith("840000-")
+    assert ticker.generate_big_one_row("fiat")[1].endswith(
+        "1.1-2.2-3.3-4.4-5.5-6.6-7.7"
+    )
+
+
+def test_fiat_height_uses_usd_specific_variant_when_fiat_is_usd(ticker_module):
+    ticker, _ = _make_ticker(ticker_module)
+
+    line_str = ticker.generate_fiat_height("fiat")
+
+    assert line_str[0] == "840000"
+    assert line_str[1] == "Fees: L 1.2 M 2.3 H 3.4"
+    assert line_str[2].startswith("672 blk -12.5 % | 23:13 -")
+    assert line_str[3] == "/$2400"
+    assert line_str[4] == "$43567"
+
+
+def test_layouts_degrade_when_usd_values_are_missing(ticker_module):
+    ticker, _ = _make_ticker(ticker_module)
+    ticker.price.price["usd"] = None
+    ticker.price.price["sat_usd"] = None
+
+    assert ticker.get_current_price("usd") == "n/a"
+    assert ticker.get_current_price("sat_per_usd") == "n/a /$"
+    assert "n/a" in ticker.generate_all("usd")[7]
+
+
+def test_generate_all_handles_missing_retarget_block(ticker_module):
+    ticker, mempool_data = _make_ticker(ticker_module)
+    mempool_data["retarget_block"] = None
+
+    line_str = ticker.generate_all("fiat")
+
+    assert line_str[0].startswith("840000 - 9:30 -")
+    assert line_str[6] == "3day : +3.2%"
+
+
 def test_fee_strings_toggle_best_fee_mode(ticker_module):
     ticker, mempool_data = _make_ticker(ticker_module, show_best_fees=True)
 
@@ -271,3 +407,30 @@ def test_build_dispatches_layout_and_finalizes_image(ticker_module):
     calls.clear()
     ticker.build(mode="fiat", layout="ohlc", mirror=False)
     assert calls == {}
+
+
+def test_initialize_sets_default_text_ink_when_available(ticker_module):
+    ticker, _ = _make_ticker(ticker_module)
+    draw = SimpleNamespace(ink=-1)
+    calls = {}
+    ticker.image = SimpleNamespace(
+        initialize=lambda: calls.setdefault("initialize", True),
+        draw=draw,
+    )
+
+    ticker.initialize()
+
+    assert calls["initialize"] is True
+    assert draw.ink == 0
+
+
+def test_initialize_handles_missing_draw_context(ticker_module):
+    ticker, _ = _make_ticker(ticker_module)
+    calls = {}
+    ticker.image = SimpleNamespace(
+        initialize=lambda: calls.setdefault("initialize", True),
+    )
+
+    ticker.initialize()
+
+    assert calls["initialize"] is True

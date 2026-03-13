@@ -2,136 +2,170 @@ import math
 import time
 from datetime import datetime
 
-from babel import numbers
-from btcpriceticker.price import Price
-from piltext import FontManager, ImageDrawer, TextGrid
-
-from btcticker.chart import makeCandle, makeSpark
-from btcticker.config import Config
-from btcticker.font_sources import ensure_default_fonts
+from btcticker.domain.market_snapshot import MarketSnapshot
+from btcticker.domain.price_snapshot import PriceSnapshot
+from btcticker.layouts import (
+    generate_all as build_all_layout,
+    generate_big_one_row as build_big_one_row_layout,
+    generate_big_two_rows as build_big_two_rows_layout,
+    generate_fiat as build_fiat_layout,
+    generate_fiat_height as build_fiat_height_layout,
+    generate_mempool as build_mempool_layout,
+    generate_ohlc as build_ohlc_layout,
+    generate_one_number as build_one_number_layout,
+)
+from btcticker.layouts.common import (
+    compute_mempool_metrics,
+    generate_line_str as build_token_lines,
+    get_current_block_height as current_block_height,
+    get_current_price as format_current_price,
+    get_fee_short_string as format_fee_short_string,
+    get_fee_string as format_fee_string,
+    get_fees_string as format_fees_string,
+    get_last_block_time2 as format_last_block_age,
+    get_last_block_time3 as format_last_block_time_ago,
+    get_last_block_time_from_metrics,
+    get_line_token_value,
+    get_minutes_between_blocks as format_minutes_between_blocks,
+    get_next_difficulty_string as format_next_difficulty,
+    get_remaining_blocks as remaining_blocks_value,
+    get_sat_per_fiat as sat_per_fiat_value,
+    get_symbol as format_symbol,
+    price_change_string as format_price_change_string,
+)
 from btcticker.mempool import Mempool
+from btcticker.render import ImageRenderer
 
 
 class Ticker:
     def __init__(
         self,
-        config: Config,
+        config,
         width,
         height,
         days_ago=1,
         mempool=None,
         price=None,
+        price_provider=None,
         font_manager=None,
         image=None,
+        renderer=None,
     ):
+        provider = price_provider or price
+        if provider is None:
+            raise ValueError("Ticker requires an injected price provider")
+
         self.config = config
         self.height = height
         self.width = width
         self.fiat = config.main.fiat
         self.mempool = mempool or Mempool(api_url=config.main.mempool_api_url)
-        self.price = price or Price(
-            fiat=self.fiat,
-            service=config.main.price_service,
-            interval=config.main.interval,
-            days_ago=days_ago,
-            enable_ohlc=config.main.enable_ohlc,
-        )
+        self.price_provider = provider
+        self.price = provider
 
-        if font_manager is None:
-            self.font_manager = FontManager(
-                default_font_size=20,
-                default_font_name=config.fonts.font_side,
-            )
-            ensure_default_fonts(self.font_manager)
-        else:
-            self.font_manager = font_manager
-        self.image = image or ImageDrawer(width, height, font_manager=self.font_manager)
+        self.renderer = renderer or ImageRenderer(
+            config,
+            width,
+            height,
+            font_manager=font_manager,
+            image=image,
+        )
+        self.font_manager = self.renderer.font_manager
+        self.image = self.renderer.image
         self.inverted = config.main.inverted
         self.orientation = config.main.orientation
+        self.set_days_ago(days_ago)
+
+    def _provider(self):
+        provider = getattr(self, "price_provider", None) or getattr(self, "price", None)
+        if provider is None:
+            raise ValueError("Ticker has no price provider")
+        return provider
+
+    def _build_market_snapshot(self) -> MarketSnapshot:
+        provider = self._provider()
+        if hasattr(provider, "get_snapshot"):
+            price_snapshot = provider.get_snapshot()
+            price_now = provider.get_price_now()
+            price_change = provider.get_price_change()
+            timeseries = provider.get_timeseries_list()
+            ohlc_history = provider.get_ohlc_history()
+        else:
+            current_price = getattr(provider, "price", {}) or {}
+            price_snapshot = PriceSnapshot(
+                fiat=self.fiat,
+                fiat_price=self._coerce_float(current_price.get("fiat")),
+                usd_price=self._coerce_float(current_price.get("usd")),
+                sat_per_fiat=self._coerce_float(current_price.get("sat_fiat")),
+                sat_per_usd=self._coerce_float(current_price.get("sat_usd")),
+                timestamp=None,
+            )
+            price_now = provider.get_price_now()
+            price_change = provider.get_price_change()
+            timeseries = list(provider.get_timeseries_list())
+            ohlc_history = getattr(provider, "ohlc", [])
+
+        return MarketSnapshot(
+            price_snapshot=price_snapshot,
+            mempool=self.mempool.getData(),
+            price_now=price_now,
+            price_change=price_change,
+            days_ago=getattr(provider, "days_ago", 1),
+            timeseries=timeseries,
+            ohlc_history=ohlc_history,
+            current_time=datetime.now(),
+        )
+
+    @staticmethod
+    def _coerce_float(value):
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _format_fee_range(self, min_fee):
-        return "%.1f-%.1f-%.1f-%.1f-%.1f-%.1f-%.1f" % (
-            min_fee[0],
-            min_fee[1],
-            min_fee[2],
-            min_fee[3],
-            min_fee[4],
-            min_fee[5],
-            min_fee[6],
-        )
+        from btcticker.layouts.common import format_fee_range
+
+        return format_fee_range(min_fee)
 
     def _format_best_fee(self, best_fees, template):
-        return template % (
-            best_fees["hourFee"],
-            best_fees["halfHourFee"],
-            best_fees["fastestFee"],
-        )
+        from btcticker.layouts.common import format_best_fee
+
+        return format_best_fee(best_fees, template)
 
     def get_line_str(self, sym):
-        mempool = self.mempool.getData()
-        symbolstring = numbers.get_currency_symbol(self.fiat.upper(), locale="en")
-        current_price = self.price.price
-        if sym == "empty":
-            return ""
-        if sym == "_current_block_height_":
-            return str(mempool["height"])
-        if sym == "_sat_per_fiat_with_symbol_":
-            return "/{}{:.0f}".format(symbolstring, current_price["sat_fiat"])
-        if sym == "_moscow_time_usd_":
-            return "{:.0f}".format(current_price["sat_usd"])
-        if sym == "_current_price_usd_":
-            return format(int(current_price["usd"]), "")
-        if sym == "_current_price_fiat_symbol_":
-            pricenowstring = self.price.get_price_now()
-            price_str = pricenowstring.replace(",", "")
-            return symbolstring + price_str
-        if sym == "_minutes_between_blocks_":
-            return self.get_minutes_between_blocks()
-        if sym == "_current_time_":
-            return self.get_current_time()
-        if sym == "_current_price_fiat_symbol_left_part_":
-            pricenowstring = self.price.get_price_now()
-            price_parts = pricenowstring.split(",")
-            return self.get_symbol() + price_parts[0]
-        if sym == "_current_price_fiat_symbol_right_part_":
-            pricenowstring = self.price.get_price_now()
-            price_parts = pricenowstring.split(",")
-            return price_parts[1]
-        return sym
+        snapshot = self._build_market_snapshot()
+        metrics = compute_mempool_metrics(snapshot)
+        return get_line_token_value(sym, snapshot, metrics)
 
     def generate_line_str(self, lines, mode):
-        line_str = []
-        line = ""
-        for sym, value in lines[mode]:
-            if sym == "n":
-                line_str.append(line)
-                line = ""
-            elif sym == "t":
-                if value != "":
-                    line += value
-                else:
-                    line += " "
-            elif sym == "s":
-                line += self.get_line_str(value)
-        if line != "":
-            line_str.append(line)
-        return line_str
+        snapshot = self._build_market_snapshot()
+        metrics = compute_mempool_metrics(snapshot)
+        return build_token_lines(lines, mode, snapshot, metrics)
 
     def set_days_ago(self, days_ago):
-        self.price.set_days_ago(days_ago)
+        provider = self._provider()
+        provider.set_days_ago(days_ago)
 
     def change_size(self, width, height):
         self.height = height
         self.width = width
-        self.image.change_size(width, height)
+        self.renderer.change_size(width, height)
+        self.image = self.renderer.image
 
     def set_min_refresh_time(self, min_refresh_time):
-        self.price.min_refresh_time = min_refresh_time
+        provider = self._provider()
+        if hasattr(provider, "set_min_refresh_time"):
+            provider.set_min_refresh_time(min_refresh_time)
+        else:
+            provider.min_refresh_time = min_refresh_time
         self.mempool.min_refresh_time = min_refresh_time
 
     def refresh(self):
         self.mempool.refresh()
-        self.price.refresh()
+        self._provider().refresh()
 
     def get_w_factor(self, w, factor=264):
         if w < 0:
@@ -170,108 +204,58 @@ class Ticker:
                 self.get_last_block_time(date_and_time=False),
                 int(last_block_sec_ago / 60),
             )
-        elif retarget_date is not None:
+        if retarget_date is not None:
             return "%d blk %.2f%% %s" % (
                 remaining_blocks,
                 (retarget_mult * 100 - 100),
                 retarget_date.strftime("%d.%b %H:%M"),
             )
-        else:
-            return "%d blk %.0f %% %d:%d" % (
-                remaining_blocks,
-                (retarget_mult * 100 - 100),
-                t_min,
-                t_sec,
-            )
+        return "%d blk %.0f %% %d:%d" % (
+            remaining_blocks,
+            (retarget_mult * 100 - 100),
+            t_min,
+            t_sec,
+        )
 
     def get_fees_string(self, mempool):
-        best_fee_str = "low: %.1f med: %.1f high: %.1f"
-        minFee = mempool["minFee"]
-        bestFees = mempool["bestFees"]
-        if self.config.main.show_best_fees:
-            return self._format_best_fee(bestFees, best_fee_str)
-        return self._format_fee_range(minFee)
+        snapshot = self._build_market_snapshot()
+        snapshot.mempool = mempool
+        return format_fees_string(snapshot, self.config.main.show_best_fees)
 
     def get_fee_string(self, mempool):
-        best_fee_str = "Fees: L %.1f M %.1f H %.1f"
-        minFee = mempool["minFee"]
-        bestFees = mempool["bestFees"]
-        if self.config.main.show_best_fees:
-            return self._format_best_fee(bestFees, best_fee_str)
-        return self._format_fee_range(minFee)
+        snapshot = self._build_market_snapshot()
+        snapshot.mempool = mempool
+        return format_fee_string(snapshot, self.config.main.show_best_fees)
 
     def get_fee_short_string(self, symbol, mempool, last_block_sec_ago):
-        bestFees = mempool["bestFees"]
-        hourFee = bestFees["hourFee"]
-        halfHourFee = bestFees["halfHourFee"]
-        fastestFee = bestFees["fastestFee"]
-
-        if len(symbol) > 0 and bestFees["halfHourFee"] > 10:
-            best_fee_str = "%s - lb -%d:%d - l %.0f m %.0f h %.0f"
-            return best_fee_str % (
-                symbol,
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-                hourFee,
-                halfHourFee,
-                fastestFee,
-            )
-
-        elif len(symbol) > 0 and bestFees["halfHourFee"] < 10:
-            best_fee_str = "%s - lb -%d:%d - l %.1f m %.1f h %.1f"
-            return best_fee_str % (
-                symbol,
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-                hourFee,
-                halfHourFee,
-                fastestFee,
-            )
-        elif bestFees["halfHourFee"] < 10:
-            best_fee_str = "lb -%d:%d - l %.1f m  %.1f h %.1f"
-            return best_fee_str % (
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-                hourFee,
-                halfHourFee,
-                fastestFee,
-            )
-        else:
-            best_fee_str = "lb -%d:%d - l %.0f m  %.0f h %.0f"
-            return best_fee_str % (
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-                hourFee,
-                halfHourFee,
-                fastestFee,
-            )
+        snapshot = self._build_market_snapshot()
+        snapshot.mempool = mempool
+        metrics = compute_mempool_metrics(snapshot)
+        metrics.last_block_seconds_ago = last_block_sec_ago
+        return format_fee_short_string(symbol, snapshot, metrics)
 
     def build_message(self, message, mirror=True):
         if not isinstance(message, str):
             return
-        self.image.initialize()
-        y = 0
-        message_per_line = message.split("\n")
-        for i in range(len(message_per_line)):
-            w, h, font_size = self.image.draw_text(
-                message_per_line[i],
-                (0, y),
-                end=(self.width - 1, self.height - 1),
-                font_name=self.config.fonts.font_buttom,
-                anchor="lt",
-            )
-            y += h
-        self.image.finalize(mirror=mirror)
+        self.initialize()
+        self.renderer.draw_message(message)
+        self.renderer.finalize(mirror=mirror)
 
-    #   Send the image to the screen
     def initialize(self):
+        if hasattr(self, "renderer") and self.renderer is not None:
+            self.renderer.initialize()
+            self.image = self.renderer.image
+            return
         self.image.initialize()
+        draw = getattr(self.image, "draw", None)
+        if draw is not None and hasattr(draw, "ink"):
+            draw.ink = 0
 
     def build(self, mode="fiat", layout="all", mirror=True):
         mempool = self.mempool.getData()
-
         if mempool["height"] < 0:
             return
+
         self.initialize()
         if layout == "big_two_rows":
             self.draw_big_two_rows(mode)
@@ -290,1103 +274,138 @@ class Ticker:
         else:
             self.draw_all(mode)
 
-        self.image.finalize(
-            mirror=mirror,
-            orientation=self.orientation,
-            inverted=self.inverted,
-        )
-
-    #   Send the image to the screen
-
-    def show(self):
-        self.image.show()
-
-    def get_current_price(self, symbol, with_symbol=False, shorten=True):
-        price_str = ""
-        current_price = self.price.price
-        symbolstring = numbers.get_currency_symbol(self.fiat.upper(), locale="en")
-        if symbol == "fiat":
-            pricenowstring = self.price.get_price_now()
-            price_str = pricenowstring.replace(",", "")
-            if with_symbol:
-                price_str = symbolstring + price_str
-        elif symbol == "usd":
-            if with_symbol:
-                price_str = "$" + format(int(current_price["usd"]), "")
-            else:
-                price_str = format(int(current_price["usd"]), "")
-        elif symbol == "moscow_time_usd":
-            price_str = "{:.0f}".format(current_price["sat_usd"])
-        elif symbol == "sat_per_fiat":
-            if with_symbol and shorten:
-                price_str = "/{}{:.0f}".format(symbolstring, current_price["sat_fiat"])
-            elif with_symbol and not shorten:
-                price_str = "{:.0f} sat/{}".format(
-                    current_price["sat_fiat"], symbolstring
-                )
-            else:
-                price_str = "{:.0f}".format(current_price["sat_fiat"])
-        elif symbol == "sat_per_usd":
-            if shorten:
-                price_str = "{:.0f} /$".format(current_price["sat_usd"])
-            else:
-                price_str = "{:.0f} sat/$".format(current_price["sat_usd"])
-
-        return price_str
-
-    def price_change_string(self, prefix_symbol):
-        pricechange = self.price.get_price_change()
-        if prefix_symbol:
-            return (
-                prefix_symbol + "   " + str(self.price.days_ago) + "d : " + pricechange
+        if hasattr(self, "renderer") and self.renderer is not None:
+            self.renderer.finalize(
+                mirror=mirror,
+                orientation=self.orientation,
+                inverted=self.inverted,
             )
         else:
-            return str(self.price.days_ago) + "day : " + pricechange
+            self.image.finalize(
+                mirror=mirror,
+                orientation=self.orientation,
+                inverted=self.inverted,
+            )
+
+    def show(self):
+        if hasattr(self, "renderer") and self.renderer is not None:
+            self.renderer.show()
+        else:
+            self.image.show()
+
+    def get_current_price(self, symbol, with_symbol=False, shorten=True):
+        return format_current_price(
+            self._build_market_snapshot(),
+            symbol,
+            with_symbol=with_symbol,
+            shorten=shorten,
+        )
+
+    def price_change_string(self, prefix_symbol):
+        return format_price_change_string(self._build_market_snapshot(), prefix_symbol)
 
     def get_symbol(self):
-        symbolstring = numbers.get_currency_symbol(self.fiat.upper(), locale="en")
-        return symbolstring
+        return format_symbol(self._build_market_snapshot())
 
     def get_current_block_height(self):
-        mempool = self.mempool.getData()
-        return str(mempool["height"])
+        return current_block_height(
+            compute_mempool_metrics(self._build_market_snapshot())
+        )
 
     def get_sat_per_fiat(self):
-        current_price = self.price.price
-        return current_price["sat_fiat"]
+        return sat_per_fiat_value(self._build_market_snapshot())
 
     def get_remaining_blocks(self):
-        mempool = self.mempool.getData()
-        last_height = mempool["last_block"]["height"]
-        remaining_blocks = 2016 - (last_height - mempool["retarget_block"]["height"])
-        return remaining_blocks
+        return remaining_blocks_value(
+            compute_mempool_metrics(self._build_market_snapshot())
+        )
 
     def get_minutes_between_blocks(self):
-        mempool = self.mempool.getData()
-        meanTimeDiff = mempool["minutes_between_blocks"] * 60
-        t_min = meanTimeDiff // 60
-        t_sec = meanTimeDiff % 60
-        return f"{int(t_min)}:{int(t_sec)}"
+        return format_minutes_between_blocks(
+            compute_mempool_metrics(self._build_market_snapshot())
+        )
 
     def get_last_block_time(self, date_and_time=True):
-        mempool = self.mempool.getData()
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        if date_and_time:
-            return str(last_block_time.strftime("%d.%b %H:%M"))
-        else:
-            return str(last_block_time.strftime("%H:%M"))
+        return get_last_block_time_from_metrics(
+            compute_mempool_metrics(self._build_market_snapshot()),
+            date_and_time=date_and_time,
+        )
 
     def get_last_block_time2(self):
-        mempool = self.mempool.getData()
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        last_block_sec_ago = (datetime.now() - last_block_time).seconds
-        return f"{int(last_block_sec_ago / 60)}:{last_block_sec_ago % 60} min"
+        return format_last_block_age(
+            compute_mempool_metrics(self._build_market_snapshot())
+        )
 
     def get_current_time(self):
         return str(time.strftime("%H:%M"))
 
     def get_last_block_time3(self):
-        mempool = self.mempool.getData()
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        last_block_sec_ago = (datetime.now() - last_block_time).seconds
-        return "%s (%d:%d min ago)" % (
-            self.get_last_block_time(),
-            int(last_block_sec_ago / 60),
-            last_block_sec_ago % 60,
+        return format_last_block_time_ago(
+            compute_mempool_metrics(self._build_market_snapshot())
         )
 
     def generate_ohlc(self, mode):
-        line_str = ["", "", "", "", "", "", ""]
-        current_price = self.price.price
-        mempool = self.mempool.getData()
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_height = mempool["last_block"]["height"]
-        meanTimeDiff = mempool["minutes_between_blocks"] * 60
-        retarget_mult = 1
-        retarget_date = None
-        if mempool["retarget_block"] is not None:
-            last_retarget_timestamp = mempool["retarget_block"]["timestamp"]
-            remaining_blocks = 2016 - (
-                last_height - mempool["retarget_block"]["height"]
-            )
-            difficulty_epoch_duration = mempool[
-                "minutes_between_blocks"
-            ] * 60 * remaining_blocks + (last_timestamp - last_retarget_timestamp)
-            retarget_mult = 14 * 24 * 60 * 60 / difficulty_epoch_duration
-            retarget_timestamp = difficulty_epoch_duration + last_retarget_timestamp
-            retarget_date = datetime.fromtimestamp(retarget_timestamp)
-        if mode == "fiat":
-            line_str[0] = self.get_current_block_height()
-            line_str[1] = self.get_last_block_time3()
-            line_str[4] = (
-                "$"
-                + format(int(current_price["usd"]), "")
-                + " - %.0f /%s - %.0f /$"
-                % (
-                    self.get_sat_per_fiat(),
-                    self.get_symbol(),
-                    current_price["sat_usd"],
-                )
-            )
-            line_str[5] = self.price_change_string(self.get_symbol())
-            line_str[6] = self.get_current_price("fiat")
-        elif mode == "height" or mode == "newblock":
-            line_str[0] = self.get_current_price("fiat", with_symbol=True)
-            line_str[1] = self.get_last_block_time3()
-            line_str[4] = (
-                "$"
-                + format(int(current_price["usd"]), "")
-                + " - %.0f /%s - %.0f /$"
-                % (
-                    self.get_sat_per_fiat(),
-                    self.get_symbol(),
-                    current_price["sat_usd"],
-                )
-            )
-            line_str[5] = self.price_change_string("")
-            line_str[6] = self.get_current_block_height()
-        elif mode == "satfiat":
-            line_str[0] = self.get_current_block_height()
-            line_str[1] = self.get_last_block_time3()
-            line_str[4] = (
-                self.get_symbol()
-                + self.get_current_price("fiat")
-                + " - $"
-                + format(int(current_price["usd"]), "")
-                + " - %.0f /$" % (current_price["sat_usd"])
-            )
-            line_str[5] = self.price_change_string("/%s" % self.get_symbol())
-            line_str[6] = self.get_current_price("sat_per_fiat")
-        elif mode == "moscowtime":
-            line_str[0] = self.get_current_block_height()
-            line_str[1] = self.get_last_block_time3()
-            line_str[4] = (
-                self.get_symbol()
-                + self.get_current_price("fiat")
-                + " - $"
-                + format(int(current_price["usd"]), "")
-                + f" - {self.get_sat_per_fiat():.0f} /{self.get_symbol()}"
-            )
-            line_str[5] = self.price_change_string("/$")
-            line_str[6] = "%.0f" % current_price["sat_usd"]
-        elif mode == "usd":
-            line_str[0] = self.get_current_block_height()
-            line_str[1] = self.get_last_block_time3()
-            line_str[4] = (
-                self.get_symbol()
-                + self.get_current_price("fiat")
-                + " - %.0f /%s - %.0f /$"
-                % (
-                    self.get_sat_per_fiat(),
-                    self.get_symbol(),
-                    current_price["sat_usd"],
-                )
-            )
-            line_str[5] = self.price_change_string("$")
-            line_str[6] = format(int(current_price["usd"]), "")
-
-        line_str[2] = self.get_fee_string(mempool)
-        line_str[3] = self.get_next_difficulty_string(
-            self.get_remaining_blocks(),
-            retarget_mult,
-            meanTimeDiff,
-            time,
-            retarget_date=retarget_date,
-            show_clock=False,
-        )
-        return line_str
+        return build_ohlc_layout(self._build_market_snapshot(), self.config.main, mode)
 
     def draw_ohlc(self, mode):
         line_str = self.generate_ohlc(mode)
-        w = 6
-        dpi = int(480 / w)
-
-        if self.width > 450 and self.height > self.width:
-            grid = TextGrid(35, 6, self.image, margin_x=1, margin_y=1)
-            grid.merge((0, 0), (2, 5))
-            grid.merge((3, 0), (4, 5))
-            grid.merge((5, 0), (20, 5))
-            grid.merge((21, 0), (22, 5))
-            grid.merge((23, 0), (24, 5))
-            grid.merge((25, 0), (26, 5))
-            grid.merge((27, 0), (28, 5))
-            grid.merge((29, 0), (34, 5))
-            start_img, end_img = grid.get_grid((5, 0), convert_to_pixel=True)
-            ohlc_image = makeCandle(
-                self.price.ohlc,
-                figsize_pixel=(end_img[0] - start_img[0], end_img[1] - start_img[1]),
-                dpi=dpi,
-                x_axis=False,
-            )
-
-            grid.set_text((0, 0), line_str[0], font_name=self.config.fonts.font_console)
-            grid.set_text((3, 0), line_str[1], font_name=self.config.fonts.font_side)
-            grid.paste_image((5, 0), ohlc_image, anchor="rs")
-            grid.set_text((21, 0), line_str[2], font_name=self.config.fonts.font_fee)
-            grid.set_text((23, 0), line_str[3], font_name=self.config.fonts.font_side)
-            grid.set_text((25, 0), line_str[4], font_name=self.config.fonts.font_side)
-            grid.set_text((27, 0), line_str[5], font_name=self.config.fonts.font_side)
-            grid.set_text(
-                (29, 0),
-                line_str[6],
-                font_name=self.config.fonts.font_buttom,
-                anchor="rs",
-            )
-        else:
-            grid = TextGrid(21, 6, self.image, margin_x=1, margin_y=1)
-            grid.merge((0, 0), (4, 5))
-            grid.merge((5, 0), (20, 5))
-            start_img, end_img = grid.get_grid((5, 0), convert_to_pixel=True)
-            ohlc_image = makeCandle(
-                self.price.ohlc,
-                figsize_pixel=(end_img[0] - start_img[0], end_img[1] - start_img[1]),
-                dpi=dpi,
-                x_axis=False,
-            )
-
-            grid.set_text((0, 0), line_str[0], font_name=self.config.fonts.font_console)
-            grid.paste_image((5, 0), ohlc_image, anchor="rs")
+        self.renderer.draw_ohlc(line_str, self._build_market_snapshot().ohlc_history)
 
     def generate_all(self, mode):
-        line_str = [" ", " ", " ", " ", " ", " ", " ", " "]
-        mempool = self.mempool.getData()
-        current_price = self.price.price
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        last_block_sec_ago = (datetime.now() - last_block_time).seconds
-        last_height = mempool["last_block"]["height"]
-        retarget_mult = 1
-        retarget_date = datetime.fromtimestamp(last_timestamp)
-        if mempool["retarget_block"] is not None:
-            last_retarget_timestamp = mempool["retarget_block"]["timestamp"]
-            remaining_blocks = 2016 - (
-                last_height - mempool["retarget_block"]["height"]
-            )
-            difficulty_epoch_duration = mempool[
-                "minutes_between_blocks"
-            ] * 60 * remaining_blocks + (last_timestamp - last_retarget_timestamp)
-            retarget_mult = 14 * 24 * 60 * 60 / difficulty_epoch_duration
-            retarget_timestamp = difficulty_epoch_duration + last_retarget_timestamp
-            retarget_date = datetime.fromtimestamp(retarget_timestamp)
-        blocks = math.ceil(mempool["vsize"] / 1e6)
-        count = mempool["count"]
-        if mode == "newblock":
-            line_str[0] = "%s - %s - %s" % (
-                self.get_current_price("fiat", with_symbol=True),
-                self.get_minutes_between_blocks(),
-                self.get_current_time(),
-            )
-            line_str[1] = self.get_fees_string(mempool)
-            line_str[2] = "%d blks %d txs" % (blocks, count)
-            line_str[3] = "%d blk %.1f%% %s" % (
-                self.get_remaining_blocks(),
-                (retarget_mult * 100 - 100),
-                retarget_date.strftime("%d.%b%H:%M"),
-            )
-            line_str[4] = self.get_current_block_height()
-
-        else:
-            if mode == "fiat":
-                if self.config.main.show_block_time:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                else:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-
-                line_str[2] = "$%.0f" % current_price["usd"]
-                line_str[3] = self.get_current_price("sat_per_usd")
-                line_str[4] = self.get_current_price("sat_per_fiat", with_symbol=True)
-                line_str[5] = self.get_symbol() + " "
-
-                line_str[7] = self.get_current_price("fiat")
-            elif mode == "height":
-                if not self.config.main.show_block_time:
-                    line_str[0] = "{} - {} - {}".format(
-                        self.get_current_price("fiat", with_symbol=True),
-                        self.get_minutes_between_blocks(),
-                        self.get_current_time(),
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_price("fiat", with_symbol=True),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "$%.0f" % current_price["usd"]
-                line_str[3] = self.get_current_price("sat_per_usd")
-                line_str[4] = self.get_current_price("sat_per_fiat", with_symbol=True)
-                # line_str[5] = ""
-                line_str[7] = self.get_current_block_height()
-            elif mode == "satfiat":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "$%.0f" % current_price["usd"]
-                line_str[3] = self.get_current_price("sat_per_usd")
-                line_str[4] = self.get_current_price("fiat", with_symbol=True)
-                line_str[5] = "sat"
-                line_str[6] = "/%s " % self.get_symbol()
-                line_str[7] = self.get_current_price("sat_per_fiat")
-            elif mode == "moscowtime":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = self.get_current_price("usd", with_symbol=True)
-                line_str[3] = self.get_current_price(
-                    "sat_per_fiat", with_symbol=True, shorten=False
-                )
-                line_str[4] = self.get_current_price("fiat", with_symbol=True)
-                line_str[5] = "sat/$"
-                line_str[6] = " "
-                line_str[7] = self.get_current_price("moscow_time_usd")
-            elif mode == "usd":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = self.get_current_price("fiat", with_symbol=True)
-                line_str[3] = self.get_current_price("sat_per_usd")
-                line_str[4] = self.get_current_price("sat_per_fiat", with_symbol=True)
-                line_str[5] = "$ "
-                line_str[6] = " "
-                line_str[7] = format(int(current_price["usd"]), "")
-
-            line_str[1] = self.get_fees_string(mempool)
-
-            line_str[6] = self.price_change_string(False)
-        return line_str
+        return build_all_layout(self._build_market_snapshot(), self.config.main, mode)
 
     def draw_all(self, mode):
-        line_str = self.generate_all(mode)
-        pricestack = self.price.get_timeseries_list()
-        if mode == "newblock":
-            grid = TextGrid(8, 4, self.image, margin_x=1, margin_y=1)
-            grid.merge((0, 0), (1, 3))
-            grid.merge((2, 0), (2, 3))
-            grid.merge((3, 0), (3, 3))
-            grid.merge((4, 0), (4, 3))
-            grid.merge((5, 0), (7, 3))
-            grid.set_text(0, line_str[0], font_name=self.config.fonts.font_console)
-            grid.set_text(1, line_str[1], font_name=self.config.fonts.font_fee)
-            grid.set_text(2, line_str[2], font_name=self.config.fonts.font_side)
-            grid.set_text(3, line_str[3], font_name=self.config.fonts.font_side)
-            grid.set_text(
-                4, line_str[4], font_name=self.config.fonts.font_buttom, anchor="rs"
-            )
-        else:
-            grid = TextGrid(21, 6, self.image, margin_x=1, margin_y=1)
-            grid.merge((0, 0), (2, 5))
-            grid.merge((3, 0), (4, 5))
-            grid.merge((5, 2), (10, 5))
-            grid.merge((5, 0), (6, 1))
-            grid.merge((7, 0), (8, 1))
-            grid.merge((9, 0), (10, 1))
-            grid.merge((11, 0), (12, 1))
-            grid.merge((11, 3), (12, 5))
-            grid.merge((13, 0), (20, 5))
-            start_img, end_img = grid.get_grid((5, 2), convert_to_pixel=True)
-            spark_image = makeSpark(
-                pricestack,
-                figsize_pixel=(end_img[0] - start_img[0], end_img[1] - start_img[1]),
-            )
-
-            grid.set_text((0, 0), line_str[0], font_name=self.config.fonts.font_top)
-            grid.set_text((3, 0), line_str[1], font_name=self.config.fonts.font_fee)
-            grid.paste_image((5, 2), spark_image, anchor="rs")
-            grid.set_text((5, 0), line_str[2], font_name=self.config.fonts.font_side)
-            grid.set_text((7, 0), line_str[3], font_name=self.config.fonts.font_side)
-            grid.set_text((9, 0), line_str[4], font_name=self.config.fonts.font_side)
-            grid.set_text((11, 0), line_str[5], font_name=self.config.fonts.font_side)
-            grid.set_text((11, 3), line_str[6], font_name=self.config.fonts.font_fee)
-            grid.set_text(
-                (13, 0),
-                line_str[7],
-                font_name=self.config.fonts.font_buttom,
-                anchor="rs",
-            )
+        snapshot = self._build_market_snapshot()
+        self.renderer.draw_all(self.generate_all(mode), snapshot.timeseries, mode)
 
     def generate_fiat(self, mode):
-        line_str = [" ", " ", " ", " ", " ", " ", " ", " "]
-        mempool = self.mempool.getData()
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        last_block_sec_ago = (datetime.now() - last_block_time).seconds
-        last_height = mempool["last_block"]["height"]
-        retarget_mult = 1
-        retarget_date = datetime.fromtimestamp(last_timestamp)
-        if mempool["retarget_block"] is not None:
-            last_retarget_timestamp = mempool["retarget_block"]["timestamp"]
-            remaining_blocks = 2016 - (
-                last_height - mempool["retarget_block"]["height"]
-            )
-            difficulty_epoch_duration = mempool[
-                "minutes_between_blocks"
-            ] * 60 * remaining_blocks + (last_timestamp - last_retarget_timestamp)
-            retarget_mult = 14 * 24 * 60 * 60 / difficulty_epoch_duration
-            retarget_timestamp = difficulty_epoch_duration + last_retarget_timestamp
-            retarget_date = datetime.fromtimestamp(retarget_timestamp)
-        meanTimeDiff = mempool["minutes_between_blocks"] * 60
-        blocks = math.ceil(mempool["vsize"] / 1e6)
-        count = mempool["count"]
-        current_price = self.price.price
-        if mode == "newblock":
-            line_str[0] = "%s - %s - %s" % (
-                self.get_current_price("fiat", with_symbol=True),
-                self.get_minutes_between_blocks(),
-                self.get_current_time(),
-            )
-            line_str[1] = self.get_fees_string(mempool)
-            line_str[2] = "%d blks %d txs" % (blocks, count)
-            line_str[3] = self.get_next_difficulty_string(
-                self.get_remaining_blocks(),
-                retarget_mult,
-                meanTimeDiff,
-                time,
-                retarget_date=retarget_date,
-                show_clock=False,
-            )
-            line_str[4] = self.get_current_block_height()
-
-        else:
-            if mode == "fiat":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "lb -%d:%d" % (
-                    int(last_block_sec_ago / 60),
-                    last_block_sec_ago % 60,
-                )
-                line_str[3] = "%d blk" % (self.get_remaining_blocks())
-                line_str[4] = self.get_current_price("sat_per_fiat", with_symbol=True)
-                line_str[5] = self.get_symbol()
-                line_str[6] = " "
-                line_str[7] = self.get_current_price("fiat")
-            elif mode == "height":
-                if not self.config.main.show_block_time:
-                    line_str[0] = "{} - {} - {}".format(
-                        self.get_current_price("fiat", with_symbol=True),
-                        self.get_minutes_between_blocks(),
-                        self.get_current_time(),
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_price("fiat", with_symbol=True),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "lb -%d:%d" % (
-                    int(last_block_sec_ago / 60),
-                    last_block_sec_ago % 60,
-                )
-                line_str[3] = "%d blk" % (self.get_remaining_blocks())
-                line_str[4] = self.get_current_price("sat_per_fiat", with_symbol=True)
-                line_str[5] = " "
-                line_str[6] = " "
-                line_str[7] = self.get_current_block_height()
-            elif mode == "satfiat":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "lb -%d:%d" % (
-                    int(last_block_sec_ago / 60),
-                    last_block_sec_ago % 60,
-                )
-                line_str[3] = "%d blk" % (self.get_remaining_blocks())
-                line_str[4] = self.get_current_price("fiat", with_symbol=True)
-                line_str[5] = "sat/%s" % self.get_symbol()
-                line_str[6] = " "
-                line_str[7] = self.get_current_price("sat_per_fiat")
-            elif mode == "moscowtime":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "lb -%d:%d" % (
-                    int(last_block_sec_ago / 60),
-                    last_block_sec_ago % 60,
-                )
-                line_str[3] = "%d blk" % (self.get_remaining_blocks())
-                line_str[4] = self.get_current_price("fiat", with_symbol=True)
-                line_str[5] = "sat"
-                line_str[6] = "/$"
-                line_str[7] = self.get_current_price("moscow_time_usd")
-            elif mode == "usd":
-                if not self.config.main.show_block_time:
-                    line_str[0] = (
-                        f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}"
-                    )
-                else:
-                    line_str[0] = "%s-%s-%d min" % (
-                        self.get_current_block_height(),
-                        self.get_last_block_time(date_and_time=False),
-                        int(last_block_sec_ago / 60),
-                    )
-                line_str[2] = "lb -%d:%d" % (
-                    int(last_block_sec_ago / 60),
-                    last_block_sec_ago % 60,
-                )
-                line_str[3] = "%d blk" % (self.get_remaining_blocks())
-                line_str[4] = self.get_current_price("fiat", with_symbol=True)
-                line_str[5] = "$"
-                line_str[6] = format(int(current_price["usd"]), "")
-                line_str[7] = self.get_current_price("usd")
-
-            line_str[1] = self.get_fees_string(mempool)
-
-            line_str[6] = self.price_change_string(False)
-        return line_str
+        return build_fiat_layout(self._build_market_snapshot(), self.config.main, mode)
 
     def draw_fiat(self, mode):
-        pricestack = self.price.get_timeseries_list()
-        line_str = self.generate_fiat(mode)
-        if mode == "newblock":
-            grid = TextGrid(8, 4, self.image, margin_x=1, margin_y=1)
-            grid.merge((0, 0), (1, 3))
-            grid.merge((2, 0), (2, 3))
-            grid.merge((3, 0), (3, 3))
-            grid.merge((4, 0), (4, 3))
-            grid.merge((5, 0), (7, 3))
-            grid.set_text(0, line_str[0], font_name=self.config.fonts.font_console)
-            grid.set_text(1, line_str[1], font_name=self.config.fonts.font_fee)
-            grid.set_text(2, line_str[2], font_name=self.config.fonts.font_side)
-            grid.set_text(3, line_str[3], font_name=self.config.fonts.font_side)
-            grid.set_text(
-                4, line_str[4], font_name=self.config.fonts.font_buttom, anchor="rs"
-            )
-        else:
-            grid = TextGrid(22, 6, self.image, margin_x=1, margin_y=1)
-            grid.merge((0, 0), (2, 5))
-            grid.merge((3, 0), (4, 5))
-            grid.merge((5, 2), (10, 5))
-            grid.merge((5, 0), (6, 1))
-            grid.merge((7, 0), (8, 1))
-            grid.merge((9, 0), (10, 1))
-            grid.merge((11, 0), (12, 1))
-            grid.merge((11, 3), (12, 5))
-            grid.merge((13, 0), (21, 5))
-            start_img, end_img = grid.get_grid((5, 2), convert_to_pixel=True)
-            spark_image = makeSpark(
-                pricestack,
-                figsize_pixel=(end_img[0] - start_img[0], end_img[1] - start_img[1]),
-            )
-
-            grid.set_text((0, 0), line_str[0], font_name=self.config.fonts.font_top)
-            grid.set_text((3, 0), line_str[1], font_name=self.config.fonts.font_fee)
-            grid.paste_image((5, 2), spark_image, anchor="rs")
-            grid.set_text((5, 0), line_str[2], font_name=self.config.fonts.font_side)
-            grid.set_text((7, 0), line_str[3], font_name=self.config.fonts.font_side)
-            grid.set_text((9, 0), line_str[4], font_name=self.config.fonts.font_side)
-            grid.set_text((11, 0), line_str[5], font_name=self.config.fonts.font_side)
-            grid.set_text((11, 3), line_str[6], font_name=self.config.fonts.font_fee)
-            grid.set_text(
-                (13, 0),
-                line_str[7],
-                font_name=self.config.fonts.font_buttom,
-                anchor="rs",
-            )
+        snapshot = self._build_market_snapshot()
+        self.renderer.draw_fiat(self.generate_fiat(mode), snapshot.timeseries, mode)
 
     def generate_fiat_height(self, mode):
-        line_str = ["", "", "", "", ""]
-        current_price = self.price.price
-        mempool = self.mempool.getData()
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_height = mempool["last_block"]["height"]
-        remaining_blocks = 0
-        retarget_mult = 1
-        if mempool["retarget_block"] is not None:
-            remaining_blocks = 2016 - (
-                last_height - mempool["retarget_block"]["height"]
-            )
-        meanTimeDiff = mempool["minutes_between_blocks"] * 60
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        last_block_sec_ago = (datetime.now() - last_block_time).seconds
-        if mempool["retarget_block"] is not None:
-            last_retarget_timestamp = mempool["retarget_block"]["timestamp"]
-            remaining_blocks = 2016 - (
-                last_height - mempool["retarget_block"]["height"]
-            )
-            difficulty_epoch_duration = mempool[
-                "minutes_between_blocks"
-            ] * 60 * remaining_blocks + (last_timestamp - last_retarget_timestamp)
-            retarget_mult = 14 * 24 * 60 * 60 / difficulty_epoch_duration
-        if mode == "fiat":
-            line_str[0] = self.get_current_block_height()
-            if self.config.main.fiat == "usd":
-                line_str[3] = self.get_current_price("sat_per_fiat", with_symbol=True)
-            else:
-                line_str[3] = "{:.0f} /{} - ${} - {:.0f} /$".format(
-                    self.get_sat_per_fiat(),
-                    self.get_symbol(),
-                    format(int(current_price["usd"]), ""),
-                    current_price["sat_usd"],
-                )
-            line_str[4] = self.get_current_price("fiat", with_symbol=True)
-        elif mode == "height" or mode == "newblock":
-            line_str[0] = self.get_current_price("fiat", with_symbol=True)
-            if self.config.main.fiat == "usd":
-                line_str[3] = self.get_current_price("sat_per_fiat", with_symbol=True)
-            else:
-                line_str[3] = "{:.0f} /{} - ${} - {:.0f} /$".format(
-                    self.get_sat_per_fiat(),
-                    self.get_symbol(),
-                    format(int(current_price["usd"]), ""),
-                    current_price["sat_usd"],
-                )
-            line_str[4] = self.get_current_block_height()
-        elif mode == "satfiat":
-            line_str[0] = self.get_current_block_height()
-            if self.config.main.fiat == "usd":
-                line_str[3] = self.get_current_price("fiat", with_symbol=True)
-            else:
-                line_str[3] = "{} - ${} - {:.0f} /$".format(
-                    self.get_current_price("fiat", with_symbol=True),
-                    format(int(current_price["usd"]), ""),
-                    current_price["sat_usd"],
-                )
-            line_str[4] = self.get_current_price("sat_per_fiat", with_symbol=True)
-        elif mode == "moscowtime":
-            line_str[0] = self.get_current_block_height()
-            if self.config.main.fiat == "usd":
-                line_str[3] = self.get_current_price("fiat", with_symbol=True)
-            else:
-                line_str[3] = "{} - ${} - {:.0f} /$".format(
-                    self.get_current_price("fiat", with_symbol=True),
-                    format(int(current_price["usd"]), ""),
-                    current_price["sat_usd"],
-                )
-            line_str[4] = "/$%.0f" % (current_price["sat_usd"])
-        elif mode == "usd":
-            line_str[0] = self.get_current_block_height()
-            if self.config.main.fiat == "usd":
-                line_str[3] = self.get_current_price("sat_per_fiat", with_symbol=True)
-            else:
-                line_str[3] = "{:.0f} /{} - {} - {:.0f} /$".format(
-                    self.get_sat_per_fiat(),
-                    self.get_symbol(),
-                    self.get_current_price("fiat", with_symbol=True),
-                    current_price["sat_usd"],
-                )
-            line_str[4] = self.get_current_price("usd")
-
-        line_str[1] = self.get_fee_string(mempool)
-        line_str[2] = self.get_next_difficulty_string(
-            self.get_remaining_blocks(),
-            retarget_mult,
-            meanTimeDiff,
-            time,
-            last_block_time=last_block_time,
-            last_block_sec_ago=last_block_sec_ago,
+        return build_fiat_height_layout(
+            self._build_market_snapshot(), self.config.main, mode
         )
-        return line_str
 
     def draw_fiat_height(self, mode):
-        line_str = self.generate_fiat_height(mode)
-        grid = TextGrid(8, 4, self.image, margin_x=1, margin_y=1)
-        grid.merge((0, 0), (1, 3))
-        grid.merge((2, 0), (2, 3))
-        grid.merge((3, 0), (3, 3))
-        grid.merge((4, 0), (4, 3))
-        grid.merge((5, 0), (7, 3))
-        grid.set_text(0, line_str[0], font_name=self.config.fonts.font_console)
-        grid.set_text(1, line_str[1], font_name=self.config.fonts.font_fee)
-        grid.set_text(2, line_str[2], font_name=self.config.fonts.font_side)
-        grid.set_text(3, line_str[3], font_name=self.config.fonts.font_side)
-        grid.set_text(
-            4, line_str[4], font_name=self.config.fonts.font_buttom, anchor="rs"
-        )
+        self.renderer.draw_fiat_height(self.generate_fiat_height(mode))
 
     def generate_mempool(self, mode):
-        mempool = self.mempool.getData()
-
-        last_timestamp = mempool["last_block"]["timestamp"]
-        last_block_time = datetime.fromtimestamp(last_timestamp)
-        last_block_sec_ago = (datetime.now() - last_block_time).seconds
-        last_height = mempool["last_block"]["height"]
-        retarget_mult = 1
-        if mempool["retarget_block"] is not None:
-            last_retarget_timestamp = mempool["retarget_block"]["timestamp"]
-            remaining_blocks = 2016 - (
-                last_height - mempool["retarget_block"]["height"]
-            )
-            difficulty_epoch_duration = mempool[
-                "minutes_between_blocks"
-            ] * 60 * remaining_blocks + (last_timestamp - last_retarget_timestamp)
-            retarget_mult = 14 * 24 * 60 * 60 / difficulty_epoch_duration
-        meanTimeDiff = mempool["minutes_between_blocks"] * 60
-        line_str = ["", "", "", ""]
-        if mode == "fiat":
-            line_str[0] = self.get_current_price("fiat")
-            line_str[2] = "%s - %.0f /%s - lb -%d:%d" % (
-                self.get_current_block_height(),
-                self.get_sat_per_fiat(),
-                self.get_symbol(),
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-            )
-
-        elif mode == "height" or mode == "newblock":
-            line_str[0] = self.get_current_block_height()
-            line_str[2] = "%s - %.0f /%s - lb -%d:%d" % (
-                self.get_current_price("fiat", with_symbol=True),
-                self.get_sat_per_fiat(),
-                self.get_symbol(),
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-            )
-
-        elif mode == "satfiat":
-            line_str[0] = self.get_current_price("sat_per_fiat", with_symbol=True)
-            line_str[2] = "%s - %s - lb -%d:%d" % (
-                self.get_current_price("fiat", with_symbol=True),
-                self.get_current_block_height(),
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-            )
-
-        elif mode == "moscowtime":
-            line_str[0] = self.get_current_price("sat_per_usd", shorten=True)
-            line_str[2] = "%s - %s - lb -%d:%d" % (
-                self.get_current_price("fiat", with_symbol=True),
-                self.get_current_block_height(),
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-            )
-
-        elif mode == "usd":
-            line_str[0] = self.get_current_price("usd")
-            line_str[2] = "%s - %s - lb -%d:%d" % (
-                self.get_current_price("fiat", with_symbol=True),
-                self.get_current_block_height(),
-                int(last_block_sec_ago / 60),
-                last_block_sec_ago % 60,
-            )
-        line_str[1] = self.get_next_difficulty_string(
-            self.get_remaining_blocks(),
-            retarget_mult,
-            meanTimeDiff,
-            time,
-            last_block_time=last_block_time,
-            last_block_sec_ago=last_block_sec_ago,
+        return build_mempool_layout(
+            self._build_market_snapshot(), self.config.main, mode
         )
-        if mempool["bestFees"]["hourFee"] > 10:
-            line_str[3] = "%d %d %d" % (
-                mempool["bestFees"]["hourFee"],
-                mempool["bestFees"]["halfHourFee"],
-                mempool["bestFees"]["fastestFee"],
-            )
-        else:
-            line_str[3] = "{:.1f} {:.1f} {:.1f}".format(
-                mempool["bestFees"]["hourFee"],
-                mempool["bestFees"]["halfHourFee"],
-                mempool["bestFees"]["fastestFee"],
-            )
-        return line_str
 
     def draw_mempool(self, mode):
-        line_str = self.generate_mempool(mode)
-        grid = TextGrid(7, 4, self.image, margin_x=1, margin_y=1)
-        grid.merge((0, 0), (1, 3))
-        grid.merge((2, 0), (2, 3))
-        grid.merge((3, 0), (3, 3))
-        grid.merge((4, 0), (6, 3))
-        grid.set_text(0, line_str[0], font_name=self.config.fonts.font_console)
-        grid.set_text(1, line_str[1], font_name=self.config.fonts.font_side)
-        grid.set_text(2, line_str[2], font_name=self.config.fonts.font_side)
-        grid.set_text(3, line_str[3], font_name=self.config.fonts.font_big, anchor="rs")
+        self.renderer.draw_mempool(self.generate_mempool(mode))
 
     def generate_big_two_rows(self, mode):
-        current_price = self.price.price
-        pricenowstring = self.price.get_price_now()
-        price_parts = pricenowstring.split(",")
-        lines = {}
-        price_parts = pricenowstring.split(",")
-        price_parts_usd = format(int(current_price["usd"]), ",").split(",")
-        lines["fiat"] = [
-            ("t", self.get_symbol() + price_parts[0]),
-            ("n", ""),
-            (
-                "t",
-                f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}",
-            ),
-            ("n", ""),
-            ("t", price_parts[1]),
-        ]
-        lines["height"] = [
-            ("t", self.get_current_block_height()[:3]),
-            ("n", ""),
-            (
-                "t",
-                f"{self.get_symbol() + pricenowstring} - {self.get_minutes_between_blocks()} - {self.get_current_time()}",
-            ),
-            ("n", ""),
-            ("t", self.get_current_block_height()[3:]),
-        ]
-        lines["newblock"] = lines["height"]
-        lines["satfiat"] = [
-            ("t", f"sat/{self.get_symbol()}"),
-            ("n", ""),
-            (
-                "t",
-                f"{self.get_symbol() + pricenowstring} - {self.get_minutes_between_blocks()} - {self.get_current_time()}",
-            ),
-            ("n", ""),
-            ("t", self.get_current_price("sat_per_fiat")),
-        ]
-        lines["moscowtime"] = [
-            ("t", "sat/$"),
-            ("n", ""),
-            (
-                "t",
-                f"{self.get_symbol() + pricenowstring} - {self.get_minutes_between_blocks()} - {self.get_current_time()}",
-            ),
-            ("n", ""),
-            ("t", self.get_current_price("moscow_time_usd")),
-        ]
-        lines["usd"] = [
-            ("t", "$" + price_parts_usd[0]),
-            ("n", ""),
-            (
-                "t",
-                f"{self.get_current_block_height()} - {self.get_minutes_between_blocks()} - {self.get_current_time()}",
-            ),
-            ("n", ""),
-            ("t", price_parts[1]),
-        ]
-
-        return self.generate_line_str(lines, mode)
-
-    def draw_big_two_rows(self, mode):
-        line_str = self.generate_big_two_rows(mode)
-        grid = TextGrid(9, 4, self.image, margin_x=1, margin_y=1)
-        grid.merge((0, 0), (3, 3))
-        grid.merge((4, 0), (4, 3))
-        grid.merge((5, 0), (8, 3))
-        grid.set_text(0, line_str[0], font_name=self.config.fonts.font_console)
-        grid.set_text(1, line_str[1], font_name=self.config.fonts.font_fee)
-        grid.set_text(
-            2, line_str[2], font_name=self.config.fonts.font_console, anchor="rs"
+        return build_big_two_rows_layout(
+            self._build_market_snapshot(), self.config.main, mode
         )
 
+    def draw_big_two_rows(self, mode):
+        self.renderer.draw_big_two_rows(self.generate_big_two_rows(mode))
+
     def generate_one_number(self, mode):
-        lines = {}
-        lines["fiat"] = [
-            ("s", "_current_price_fiat_symbol_"),
-            ("n", ""),
-            ("t", "Market price of bitcoin"),
-        ]
-        lines["height"] = [
-            ("s", "_current_block_height_"),
-            ("n", ""),
-            ("t", "Number of blocks in the blockchain"),
-        ]
-        lines["newblock"] = [
-            ("s", "_current_block_height_"),
-            ("n", ""),
-            ("t", "Number of blocks in the blockchain"),
-        ]
-        lines["satfiat"] = [
-            ("s", "_sat_per_fiat_with_symbol_"),
-            ("n", ""),
-            ("t", f"Value of one {self.get_symbol()} in sats"),
-        ]
-        lines["moscowtime"] = [
-            ("s", "_moscow_time_usd_"),
-            ("n", ""),
-            ("t", "moscow time"),
-        ]
-        lines["usd"] = [
-            ("s", "_current_price_usd_"),
-            ("n", ""),
-            ("t", "Market price of bitcoin"),
-        ]
-        return self.generate_line_str(lines, mode)
+        return build_one_number_layout(
+            self._build_market_snapshot(), self.config.main, mode
+        )
 
     def draw_one_number(self, mode):
-        line_str = self.generate_one_number(mode)
-        grid = TextGrid(8, 4, self.image, margin_x=10, margin_y=10)
-        grid.merge((2, 0), (4, 3))
-        grid.merge((5, 0), (7, 3))
-        grid.set_text(0, line_str[0], font_name=self.config.fonts.font_fee)
-        grid.set_text(1, line_str[1], font_name=self.config.fonts.font_fee)
+        self.renderer.draw_one_number(self.generate_one_number(mode))
 
     def generate_big_one_row(self, mode):
-        mempool = self.mempool.getData()
-        lines = {}
-
-        lines["fiat"] = [
-            (
-                "t",
-                "%s - %d - %s - %s"  # noqa: UP031
-                % (
-                    self.get_current_block_height(),
-                    self.get_remaining_blocks(),
-                    self.get_minutes_between_blocks(),
-                    self.get_current_time(),
-                ),
-            ),
-            ("n", ""),
-            ("t", self.get_symbol() + " " + self.get_fee_string(mempool)),
-            ("n", ""),
-            ("t", self.get_current_price("fiat")),
-        ]
-        lines["height"] = [
-            (
-                "t",
-                "%s - %d - %s - %s"
-                % (
-                    self.get_current_price("fiat", with_symbol=True),
-                    self.get_remaining_blocks(),
-                    self.get_minutes_between_blocks(),
-                    self.get_current_time(),
-                ),
-            ),
-            ("n", ""),
-            ("t", self.get_fee_string(mempool)),
-            ("n", ""),
-            ("t", self.get_current_block_height()),
-        ]
-        lines["satfiat"] = [
-            (
-                "t",
-                "%s - %d - %s - %s"
-                % (
-                    self.get_current_block_height(),
-                    self.get_remaining_blocks(),
-                    self.get_minutes_between_blocks(),
-                    self.get_current_time(),
-                ),
-            ),
-            ("n", ""),
-            ("t", "/%s" % self.get_symbol() + " " + self.get_fee_string(mempool)),
-            ("n", ""),
-            ("t", self.get_current_price("sat_per_fiat")),
-        ]
-        lines["moscowtime"] = [
-            (
-                "t",
-                "%s - %d - %s - %s"
-                % (
-                    self.get_current_block_height(),
-                    self.get_remaining_blocks(),
-                    self.get_minutes_between_blocks(),
-                    self.get_current_time(),
-                ),
-            ),
-            ("n", ""),
-            ("t", "/$ " + self.get_fee_string(mempool)),
-            ("n", ""),
-            ("t", self.get_current_price("sat_per_fiat")),
-        ]
-        lines["usd"] = [
-            (
-                "t",
-                "%s - %d - %s - %s"
-                % (
-                    self.get_current_block_height(),
-                    self.get_remaining_blocks(),
-                    self.get_minutes_between_blocks(),
-                    self.get_current_time(),
-                ),
-            ),
-            ("n", ""),
-            ("t", "$ " + self.get_fee_string(mempool)),
-            ("n", ""),
-            ("t", self.get_current_price("usd")),
-        ]
-
-        # line_str[1] = self.get_fee_string(mempool)
-
-        if self.config.main.show_block_time:
-            lines["fiat"][0] = (
-                "t",
-                f"{self.get_current_block_height()} - {self.get_last_block_time()} - "
-                f"{self.get_last_block_time2()}",
-            )
-            lines["height"][0] = (
-                "t",
-                "{} - {} - {}".format(
-                    self.get_current_price("fiat", with_symbol=True),
-                    self.get_last_block_time(),
-                    self.get_last_block_time2(),
-                ),
-            )
-            lines["satfiat"][0] = (
-                "t",
-                f"{self.get_current_block_height()} - {self.get_last_block_time()} - "
-                f"{self.get_last_block_time2()}",
-            )
-            lines["moscowtime"][0] = (
-                "t",
-                f"{self.get_current_block_height()} - {self.get_last_block_time()} - "
-                f"{self.get_last_block_time2()}",
-            )
-            lines["usd"][0] = (
-                "t",
-                f"{self.get_current_block_height()} - {self.get_last_block_time()} "
-                f"- {self.get_last_block_time2()}",
-            )
-
-        lines["newblock"] = lines["height"]
-        return self.generate_line_str(lines, mode)
+        return build_big_one_row_layout(
+            self._build_market_snapshot(), self.config.main, mode
+        )
 
     def draw_big_one_row(self, mode):
-        line_str = self.generate_big_one_row(mode)
-        grid = TextGrid(9, 4, self.image, margin_x=1, margin_y=1)
-        grid.merge((0, 0), (0, 3))
-        grid.merge((1, 0), (1, 3))
-        grid.merge((2, 0), (8, 3))
-        grid.set_text(0, line_str[0], font_name=self.config.fonts.font_console)
-        grid.set_text(1, line_str[1], font_name=self.config.fonts.font_fee)
-        grid.set_text(2, line_str[2], font_name=self.config.fonts.font_big, anchor="rs")
+        self.renderer.draw_big_one_row(self.generate_big_one_row(mode))
 
     def get_image(self):
+        if hasattr(self, "renderer") and self.renderer is not None:
+            return self.renderer.get_image()
         return self.image.image_handler.image

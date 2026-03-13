@@ -18,4 +18,5 @@ price_refresh_seconds = 10
 
 If `symbol` is empty, `btcticker` derives it from `fiat` as `BTC/<FIAT>`.
 
-Legacy `price_service` is still accepted as a deprecated compatibility input and routes through the legacy adapter.
+Legacy `price_service` configs are no longer supported. Migrate them to
+`price_provider=pyccxt` plus explicit `exchange`, `symbol`, and `usd_symbol` values.

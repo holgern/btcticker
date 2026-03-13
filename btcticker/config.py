@@ -29,7 +29,6 @@ class MainConfig(BaseModel):
     usd_symbol: str = "BTC/USD"
     ccxt_timeout: int = 30000
     price_refresh_seconds: int = 10
-    price_service: str | None = None
     enable_ohlc: bool = True
     inverted: bool = False
     show_block_height: bool = False
@@ -55,14 +54,6 @@ class MainConfig(BaseModel):
         if value is None:
             return ""
         return str(value).strip().upper()
-
-    @field_validator("price_service", mode="before")
-    @classmethod
-    def _normalize_price_service(cls, value):
-        if value is None:
-            return None
-        normalized = str(value).strip().lower()
-        return normalized or None
 
 
 class FontsConfig(BaseModel):

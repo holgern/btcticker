@@ -5,7 +5,6 @@ import os
 import shlex
 import shutil
 import subprocess
-import warnings
 from configparser import ConfigParser
 from collections.abc import Iterable
 from pathlib import Path
@@ -179,30 +178,12 @@ def _derive_symbol(config: Config) -> str:
 
 
 def _resolve_provider_name(config: Config) -> str:
-    has_provider = config.has_option("Main", "price_provider")
-    has_service = config.has_option("Main", "price_service") and bool(
-        config.main.price_service
-    )
-
-    if has_provider:
-        provider_name = config.main.price_provider
-        if has_service:
-            warnings.warn(
-                "'price_service' is deprecated; use 'price_provider', 'exchange', "
-                "'symbol', and 'usd_symbol' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return provider_name
-
-    if has_service:
-        warnings.warn(
-            "'price_service' is deprecated; using the legacy btcpriceticker adapter.",
-            DeprecationWarning,
-            stacklevel=2,
+    if config.has_option("Main", "price_service"):
+        raise ValueError(
+            "'price_service' is no longer supported. Migrate your config to "
+            "'price_provider=pyccxt' and set 'exchange', 'symbol', and "
+            "'usd_symbol'."
         )
-        return "btcpriceticker"
-
     return config.main.price_provider
 
 
@@ -222,21 +203,8 @@ def build_price_provider(config: Config, days_ago: int):
             min_refresh_time=config.main.price_refresh_seconds,
         )
 
-    if provider_name in {"btcpriceticker", "legacy"}:
-        from btcticker.providers import BTCPriceTickerProvider
-
-        return BTCPriceTickerProvider(
-            fiat=config.main.fiat,
-            service=config.main.price_service or "coingecko",
-            interval=config.main.interval,
-            days_ago=days_ago,
-            enable_ohlc=config.main.enable_ohlc,
-            min_refresh_time=config.main.price_refresh_seconds,
-        )
-
     raise ValueError(
-        f"Unknown price provider '{provider_name}'. Available providers: "
-        "pyccxt, btcpriceticker"
+        f"Unknown price provider '{provider_name}'. Available providers: pyccxt"
     )
 
 

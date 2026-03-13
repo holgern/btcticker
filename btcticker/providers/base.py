@@ -21,10 +21,6 @@ class PriceSnapshotIncompleteError(PriceProviderError):
     """Raised when a provider cannot construct a usable current snapshot."""
 
 
-class LegacyPriceProviderUnavailableError(PriceProviderError):
-    """Raised when the optional btcpriceticker adapter cannot be used."""
-
-
 class PriceProvider(Protocol):
     days_ago: int
     min_refresh_time: int

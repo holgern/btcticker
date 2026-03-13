@@ -4,72 +4,10 @@ from types import SimpleNamespace
 import pytest
 
 from btcticker.providers import (
-    BTCPriceTickerProvider,
     PriceHistoryUnavailableError,
     PriceMarketNotFoundError,
     PyCCXTPriceProvider,
 )
-
-
-class FakeLegacyPrice:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.days_ago = kwargs["days_ago"]
-        self.min_refresh_time = 120
-        self.price = {
-            "fiat": 43000.0,
-            "usd": 44000.0,
-            "sat_fiat": 2325.0,
-            "sat_usd": 2272.0,
-        }
-        self.ohlc = [{"Close": 43000.0}]
-
-    def set_days_ago(self, days_ago):
-        self.days_ago = days_ago
-
-    def refresh(self):
-        return None
-
-    def get_price_now(self):
-        return "43,000"
-
-    def get_price_change(self):
-        return "+2.5%"
-
-    def get_timeseries_list(self):
-        return [42000.0, 43000.0]
-
-    def get_timestamp(self):
-        return 1700000000
-
-
-def test_btcpriceticker_provider_exposes_normalized_snapshot(monkeypatch):
-    monkeypatch.setattr(
-        "btcticker.providers.btcpriceticker_provider.Price",
-        FakeLegacyPrice,
-    )
-
-    provider = BTCPriceTickerProvider(
-        fiat="eur",
-        service="coingecko",
-        interval="1h",
-        days_ago=3,
-        enable_ohlc=True,
-    )
-
-    snapshot = provider.get_snapshot()
-
-    assert snapshot.fiat == ""
-    assert snapshot.fiat_price == 43000.0
-    assert snapshot.usd_price == 44000.0
-    assert snapshot.sat_per_fiat == 2325.0
-    assert snapshot.sat_per_usd == 2272.0
-    assert provider.get_price_now() == "43,000"
-    assert provider.get_price_change() == "+2.5%"
-    assert provider.get_timeseries_list() == [42000.0, 43000.0]
-    assert provider.get_ohlc_history() == [{"Close": 43000.0}]
-    provider.set_days_ago(5)
-    assert provider.days_ago == 5
 
 
 class FakeTicker:
@@ -160,6 +98,8 @@ def test_pyccxt_provider_refreshes_snapshot_and_reuses_exchange(monkeypatch):
     assert snapshot.fiat == "eur"
     assert snapshot.fiat_price == 43000.0
     assert snapshot.usd_price == 44000.0
+    assert snapshot.sat_per_fiat is not None
+    assert snapshot.sat_per_usd is not None
     assert round(snapshot.sat_per_fiat, 2) == round(100_000_000 / 43000.0, 2)
     assert round(snapshot.sat_per_usd, 2) == round(100_000_000 / 44000.0, 2)
     assert provider.get_price_now() == "43,000"

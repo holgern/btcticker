@@ -336,6 +336,7 @@ def test_config_create_global_writes_default_file(monkeypatch, tmp_path):
     content = global_config.read_text(encoding="utf-8")
     assert "[Main]" in content
     assert "[Fonts]" in content
+    assert "price_service" not in content
 
 
 def test_config_edit_uses_default_editor(monkeypatch, tmp_path):
@@ -486,42 +487,7 @@ def test_build_price_provider_uses_pyccxt_defaults(monkeypatch):
     }
 
 
-def test_build_price_provider_uses_legacy_adapter(monkeypatch):
-    calls = {}
-
-    class FakeProvider:
-        def __init__(self, **kwargs):
-            calls.update(kwargs)
-
-    monkeypatch.setattr(cli, "_resolve_provider_name", lambda config: "btcpriceticker")
-    monkeypatch.setattr(
-        "btcticker.providers.BTCPriceTickerProvider",
-        FakeProvider,
-    )
-
-    config = SimpleNamespace(
-        main=SimpleNamespace(
-            fiat="eur",
-            price_service="coingecko",
-            interval="1h",
-            enable_ohlc=False,
-            price_refresh_seconds=15,
-        )
-    )
-
-    cli.build_price_provider(cast(cli.Config, config), 5)
-
-    assert calls == {
-        "fiat": "eur",
-        "service": "coingecko",
-        "interval": "1h",
-        "days_ago": 5,
-        "enable_ohlc": False,
-        "min_refresh_time": 15,
-    }
-
-
-def test_resolve_provider_name_warns_for_legacy_price_service(tmp_path):
+def test_resolve_provider_name_fails_for_legacy_price_service(tmp_path):
     config_path = tmp_path / "config.ini"
     config_path.write_text(
         "[Main]\nprice_service = coingecko\n\n[Fonts]\n",
@@ -529,7 +495,15 @@ def test_resolve_provider_name_warns_for_legacy_price_service(tmp_path):
     )
     config = cli.Config(path=str(config_path))
 
-    with pytest.warns(DeprecationWarning, match="price_service"):
-        provider_name = cli._resolve_provider_name(config)
+    with pytest.raises(ValueError, match="price_service"):
+        cli._resolve_provider_name(config)
 
-    assert provider_name == "btcpriceticker"
+
+def test_build_price_provider_rejects_unknown_provider():
+    config = SimpleNamespace(
+        has_option=lambda *_args: False,
+        main=SimpleNamespace(price_provider="legacy"),
+    )
+
+    with pytest.raises(ValueError, match="Unknown price provider"):
+        cli.build_price_provider(cast(cli.Config, config), 1)

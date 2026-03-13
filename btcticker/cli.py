@@ -502,7 +502,7 @@ def _run_image(
     days = _resolve_days(config_obj, days)
 
     ticker = _build_ticker(config_obj, days)
-    ticker.build(mode=mode, layout=layout, mirror=True)
+    ticker.build(mode=mode, layout=layout, mirror=False)
 
     output_path = Path(output).expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)

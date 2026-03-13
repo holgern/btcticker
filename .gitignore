@@ -172,3 +172,4 @@ cython_debug/
 btcticker/_version.py
 btcticker/fonts/
 context_btcticker.md
+btcticker.png

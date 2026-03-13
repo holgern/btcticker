@@ -1,4 +1,5 @@
 from configparser import ConfigParser
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -43,14 +44,14 @@ class MainConfig(BaseModel):
 
     @field_validator("fiat", "price_provider", "exchange", mode="before")
     @classmethod
-    def _normalize_lowercase(cls, value):
+    def _normalize_lowercase(cls, value: Any) -> Any:
         if value is None:
             return value
         return str(value).strip().lower()
 
     @field_validator("symbol", "usd_symbol", mode="before")
     @classmethod
-    def _normalize_symbol(cls, value):
+    def _normalize_symbol(cls, value: Any) -> str:
         if value is None:
             return ""
         return str(value).strip().upper()
@@ -70,8 +71,11 @@ class FontsConfig(BaseModel):
     font_fee_size: int = 14
 
 
+ConfigSection = TypeVar("ConfigSection", bound=BaseModel)
+
+
 class Config:
-    def __init__(self, path="config.ini"):
+    def __init__(self, path: str = "config.ini") -> None:
         self.__config = ConfigParser()
         parsed_files = self.__config.read(path)
         if not parsed_files:
@@ -80,10 +84,14 @@ class Config:
         self.main = self._load_section("Main", MainConfig)
         self.fonts = self._load_section("Fonts", FontsConfig)
 
-    def has_option(self, section_name, option_name):
+    def has_option(self, section_name: str, option_name: str) -> bool:
         return self.__config.has_option(section_name, option_name)
 
-    def _load_section(self, section_name, model):
+    def _load_section(
+        self,
+        section_name: str,
+        model: type[ConfigSection],
+    ) -> ConfigSection:
         if section_name not in self.__config:
             raise ConfigurationException(f"Missing section: {section_name}")
 

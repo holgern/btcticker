@@ -1,21 +1,29 @@
 import datetime
+from collections.abc import Sequence
+from typing import Any
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import matplotlib.units as munits
 import mplfinance as mpf
 import numpy as np
+import numpy.typing as npt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from PIL import Image
 
 
-def makeSpark(pricestack, figsize_pixel=(170, 51), dpi=17):
+def makeSpark(
+    pricestack: Sequence[float],
+    figsize_pixel: tuple[int, int] = (170, 51),
+    dpi: int = 17,
+) -> Image.Image:
     # Draw and save the sparkline that represents historical data
 
     # Subtract the mean from the sparkline to make the
     # mean appear on the plot (it's really the x axis)
-    x = pricestack - np.mean(pricestack)
+    values = np.asarray(pricestack, dtype=float)
+    x = values - np.mean(values)
     figsize = (figsize_pixel[0] / dpi, figsize_pixel[1] / dpi)
     fig = Figure(figsize=figsize, dpi=dpi)
     ax = fig.add_subplot()
@@ -31,13 +39,19 @@ def makeSpark(pricestack, figsize_pixel=(170, 51), dpi=17):
     ax.axhline(c="k", linewidth=4, linestyle=(0, (5, 2, 1, 2)))
     canvas.draw()
     buf = canvas.buffer_rgba()
-    X = np.asarray(buf)
+    X: npt.NDArray[np.uint8] = np.asarray(buf)
     im = Image.fromarray(X)
 
     return im
 
 
-def makeCandle(ohlc, figsize_pixel=(170, 51), dpi=17, plot_type="candle", x_axis=True):
+def makeCandle(
+    ohlc: Any,
+    figsize_pixel: tuple[int, int] = (170, 51),
+    dpi: int = 17,
+    plot_type: str = "candle",
+    x_axis: bool = True,
+) -> Image.Image:
     figsize = (figsize_pixel[0] / dpi, figsize_pixel[1] / dpi)
     converter = mdates.ConciseDateConverter()
     munits.registry[np.datetime64] = converter
@@ -56,7 +70,7 @@ def makeCandle(ohlc, figsize_pixel=(170, 51), dpi=17, plot_type="candle", x_axis
 
     canvas.draw()
     buf = canvas.buffer_rgba()
-    X = np.asarray(buf)
+    X: npt.NDArray[np.uint8] = np.asarray(buf)
     im = Image.fromarray(X)
     plt.close("all")
 

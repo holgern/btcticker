@@ -8,7 +8,8 @@ import sys
 from collections.abc import Iterable
 from configparser import ConfigParser
 from pathlib import Path
-from typing import Annotated
+from collections.abc import Callable
+from typing import Annotated, Any, Protocol, cast
 
 import click
 import typer
@@ -110,6 +111,18 @@ config_app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 app.add_typer(config_app, name="config")
+
+
+class TickerLike(Protocol):
+    def set_days_ago(self, days_ago: int) -> None: ...
+
+    def refresh(self) -> None: ...
+
+    def build(
+        self, mode: str = "fiat", layout: str = "all", mirror: bool = True
+    ) -> None: ...
+
+    def get_image(self) -> Any: ...
 
 
 def _split_csv(value: str) -> list[str]:
@@ -242,7 +255,7 @@ def build_price_provider(config: Config, days_ago: int):
     )
 
 
-def _build_ticker(config: Config, days_ago: int):
+def _build_ticker(config: Config, days_ago: int) -> TickerLike:
     from btcticker.ticker import Ticker
 
     height, width = _get_display_size(config.main.epd_type)
@@ -256,14 +269,15 @@ def _build_ticker(config: Config, days_ago: int):
     return ticker
 
 
-def _generate_lines(ticker, layout: str, mode: str) -> list[str]:
+def _generate_lines(ticker: Any, layout: str, mode: str) -> list[str]:
     if layout not in LAYOUT_SPECS:
         available_layouts = ", ".join(sorted(LAYOUT_SPECS.keys()))
         raise ValueError(
             f"Unknown layout '{layout}'. Available layouts: {available_layouts}"
         )
 
-    generate = getattr(ticker, LAYOUT_SPECS[layout]["generator"])
+    generator_name = cast(str, LAYOUT_SPECS[layout]["generator"])
+    generate = cast(Callable[[str], list[str]], getattr(ticker, generator_name))
     return generate(mode)
 
 
@@ -308,10 +322,10 @@ def _run_layouts() -> int:
         rows.append(
             [
                 layout,
-                spec["generator"],
-                spec["draw"],
+                cast(str, spec["generator"]),
+                cast(str, spec["draw"]),
                 str(spec["text_rows"]),
-                spec["newblock"],
+                cast(str, spec["newblock"]),
                 default_positions.get(layout, "-"),
                 ",".join(SUPPORTED_MODES),
             ]

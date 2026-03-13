@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Protocol, cast
 
-if TYPE_CHECKING:
-    pass
+
+class FontManagerLike(Protocol):
+    def list_font_directories(self) -> list[str]: ...
+
+    def get_full_path(self, font_name: str) -> str: ...
+
+    def download_google_font(self, part1: str, part2: str, font_name: str) -> str: ...
+
+    def download_font(self, font_url: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -23,25 +30,25 @@ DEFAULT_FONT_SPECS = (
 )
 
 
-def _get_font_manager(font_manager: Any = None):
+def _get_font_manager(font_manager: FontManagerLike | None = None) -> FontManagerLike:
     if font_manager is not None:
         return font_manager
 
     from piltext import FontManager
 
-    return FontManager()
+    return cast(FontManagerLike, FontManager())
 
 
 def list_default_font_names() -> list[str]:
     return [spec.font_name for spec in DEFAULT_FONT_SPECS]
 
 
-def get_user_font_directories(font_manager: Any = None) -> list[str]:
+def get_user_font_directories(font_manager: FontManagerLike | None = None) -> list[str]:
     fm = _get_font_manager(font_manager)
     return fm.list_font_directories()
 
 
-def ensure_default_fonts(font_manager: Any = None) -> list[str]:
+def ensure_default_fonts(font_manager: FontManagerLike | None = None) -> list[str]:
     fm = _get_font_manager(font_manager)
     downloaded: list[str] = []
 
@@ -59,12 +66,12 @@ def download_google_font(
     part1: str,
     part2: str,
     font_name: str,
-    font_manager: Any = None,
+    font_manager: FontManagerLike | None = None,
 ) -> str:
     fm = _get_font_manager(font_manager)
     return fm.download_google_font(part1, part2, font_name)
 
 
-def download_font_url(url: str, font_manager: Any = None) -> str:
+def download_font_url(url: str, font_manager: FontManagerLike | None = None) -> str:
     fm = _get_font_manager(font_manager)
     return fm.download_font(url)

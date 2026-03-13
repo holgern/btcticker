@@ -15,5 +15,5 @@ class MarketSnapshot:
     price_change: str
     days_ago: int
     timeseries: list[float] = field(default_factory=list)
-    ohlc_history: Any = None
+    ohlc_history: list[dict[str, Any]] = field(default_factory=list)
     current_time: datetime = field(default_factory=datetime.now)

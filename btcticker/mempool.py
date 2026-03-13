@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Any
 
 from pymempool import DifficultyAdjustment, MempoolAPI, RecommendedFees
 
@@ -9,25 +10,25 @@ logger = logging.getLogger(__name__)
 class Mempool:
     def __init__(
         self,
-        api_url="https://mempool.space/api/,https://mempool.emzy.de/api/,"
+        api_url: str = "https://mempool.space/api/,https://mempool.emzy.de/api/,"
         "https://mempool.bitcoin-21.org/api/",
-        n_fee_blocks=7,
-    ):
+        n_fee_blocks: int = 7,
+    ) -> None:
         self.mempoolApiUrl = api_url
         self.mempool = MempoolAPI(api_base_url=api_url)
         self.min_refresh_time = 10
         self.mempool.n_fee_blocks = n_fee_blocks
-        self.data = {}
+        self.data: dict[str, Any] = {}
         self.refresh()
 
-    def _is_cache_fresh(self, current_time):
+    def _is_cache_fresh(self, current_time: float) -> bool:
         return (
             "timestamp" in self.data
             and current_time - self.data["timestamp"] < self.min_refresh_time
         )
 
-    def _fetch_data(self, current_time):
-        data = {"timestamp": current_time}
+    def _fetch_data(self, current_time: float) -> dict[str, Any]:
+        data: dict[str, Any] = {"timestamp": current_time}
         bestFees = {"fastestFee": -1, "halfHourFee": -1, "hourFee": -1}
 
         logger.info("Getting Data")
@@ -67,11 +68,11 @@ class Mempool:
         data["tip_hash"] = lastblockhash
         return data
 
-    def refresh(self):
+    def refresh(self) -> None:
         current_time = time.time()
         if self._is_cache_fresh(current_time):
             return
         self.data = self._fetch_data(current_time)
 
-    def getData(self):
+    def getData(self) -> dict[str, Any]:
         return self.data

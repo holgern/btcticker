@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import Any
+from typing import Any, cast
 
 from btcticker.domain.price_snapshot import PriceSnapshot
 from btcticker.providers._pyccxt_compat import (
@@ -17,6 +17,9 @@ from btcticker.providers.base import (
     PriceProviderError,
     PriceSnapshotIncompleteError,
 )
+
+Market = Any
+TickerData = Any
 
 INTERVAL_ALIASES = {
     "1h": "1h",
@@ -135,15 +138,20 @@ class PyCCXTPriceProvider:
         self._exchange_cache[cache_key] = exchange
         return exchange
 
-    def _get_market(self, symbol: str, required: bool = True):
-        market = self._exchange.get_market(symbol)
+    def _get_market(self, symbol: str, required: bool = True) -> Market | None:
+        market = cast(Market | None, self._exchange.get_market(symbol))
         if market is None and required:
             raise PriceMarketNotFoundError(
                 f"Market '{symbol}' not found on exchange '{self.exchange_name}'"
             )
         return market
 
-    def _fetch_ticker(self, market, symbol: str, required: bool = True):
+    def _fetch_ticker(
+        self,
+        market: Market | None,
+        symbol: str,
+        required: bool = True,
+    ) -> TickerData | None:
         if market is None:
             if required:
                 raise PriceMarketNotFoundError(
@@ -161,16 +169,23 @@ class PyCCXTPriceProvider:
         return ticker
 
     def _fetch_price_history(self) -> list[float]:
+        if self._fiat_market is None:
+            raise PriceMarketNotFoundError(
+                f"Market '{self.fiat_symbol}' not found on exchange '{self.exchange_name}'"
+            )
+
+        fiat_market = self._fiat_market
+
         since = self._history_since(self.days_ago)
         limit = max(2, self._history_limit(self.days_ago))
-        if not self._fiat_market.fetch_ohlc(
+        if not fiat_market.fetch_ohlc(
             timeframe=self.interval, since=since, limit=limit
         ):
             raise PriceHistoryUnavailableError(
                 f"Unable to fetch price history for '{self.fiat_symbol}'"
             )
 
-        rows = self._fiat_market.get_price_history()
+        rows = fiat_market.get_price_history()
         prices = [float(row["price"]) for row in rows if row.get("price") is not None]
         if not prices:
             raise PriceHistoryUnavailableError(
@@ -179,15 +194,24 @@ class PyCCXTPriceProvider:
         return prices
 
     def _fetch_ohlc(self) -> list[dict[str, Any]]:
+        if self._fiat_market is None:
+            return []
+
+        fiat_market = self._fiat_market
+
         since = self._history_since(max(self.days_ago, 1))
         limit = max(2, self._history_limit(max(self.days_ago, 1)))
-        if not self._fiat_market.fetch_ohlc(
+        if not fiat_market.fetch_ohlc(
             timeframe=self.interval, since=since, limit=limit
         ):
             return []
-        return list(self._fiat_market.get_ohlc_history() or [])
+        return list(fiat_market.get_ohlc_history() or [])
 
-    def _build_snapshot(self, fiat_ticker, usd_ticker) -> PriceSnapshot:
+    def _build_snapshot(
+        self,
+        fiat_ticker: TickerData,
+        usd_ticker: TickerData | None,
+    ) -> PriceSnapshot:
         fiat_price = float(fiat_ticker.last)
         usd_price = (
             float(usd_ticker.last)
@@ -249,6 +273,7 @@ class PyCCXTPriceProvider:
     def _compute_sats(price: float | None) -> float | None:
         if price in (None, 0):
             return None
+        assert price is not None
         return 100_000_000 / price
 
     @staticmethod

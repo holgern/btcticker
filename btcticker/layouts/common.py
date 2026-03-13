@@ -76,7 +76,7 @@ def compute_mempool_metrics(snapshot: MarketSnapshot) -> MempoolMetrics:
 
 def format_fee_range(min_fee: list[float]) -> str:
     padded = list(min_fee) + [0.0] * max(0, 7 - len(min_fee))
-    return "%.1f-%.1f-%.1f-%.1f-%.1f-%.1f-%.1f" % tuple(padded[:7])
+    return "{:.1f}-{:.1f}-{:.1f}-{:.1f}-{:.1f}-{:.1f}-{:.1f}".format(*tuple(padded[:7]))
 
 
 def format_best_fee(best_fees: dict[str, float], template: str) -> str:
@@ -118,37 +118,27 @@ def get_fee_short_string(
     fastest_fee = float(best_fees.get("fastestFee", 0.0))
 
     if len(symbol) > 0 and half_hour_fee > 10:
-        return "%s - lb -%d:%d - l %.0f m %.0f h %.0f" % (
-            symbol,
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
-            hour_fee,
-            half_hour_fee,
-            fastest_fee,
+        return (
+            f"{symbol} - lb -{int(metrics.last_block_seconds_ago / 60)}:"
+            f"{metrics.last_block_seconds_ago % 60} - l {hour_fee:.0f} "
+            f"m {half_hour_fee:.0f} h {fastest_fee:.0f}"
         )
     if len(symbol) > 0 and half_hour_fee < 10:
-        return "%s - lb -%d:%d - l %.1f m %.1f h %.1f" % (
-            symbol,
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
-            hour_fee,
-            half_hour_fee,
-            fastest_fee,
+        return (
+            f"{symbol} - lb -{int(metrics.last_block_seconds_ago / 60)}:"
+            f"{metrics.last_block_seconds_ago % 60} - l {hour_fee:.1f} "
+            f"m {half_hour_fee:.1f} h {fastest_fee:.1f}"
         )
     if half_hour_fee < 10:
-        return "lb -%d:%d - l %.1f m  %.1f h %.1f" % (
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
-            hour_fee,
-            half_hour_fee,
-            fastest_fee,
+        return (
+            f"lb -{int(metrics.last_block_seconds_ago / 60)}:"
+            f"{metrics.last_block_seconds_ago % 60} - l {hour_fee:.1f} "
+            f"m  {half_hour_fee:.1f} h {fastest_fee:.1f}"
         )
-    return "lb -%d:%d - l %.0f m  %.0f h %.0f" % (
-        int(metrics.last_block_seconds_ago / 60),
-        metrics.last_block_seconds_ago % 60,
-        hour_fee,
-        half_hour_fee,
-        fastest_fee,
+    return (
+        f"lb -{int(metrics.last_block_seconds_ago / 60)}:"
+        f"{metrics.last_block_seconds_ago % 60} - l {hour_fee:.0f} "
+        f"m  {half_hour_fee:.0f} h {fastest_fee:.0f}"
     )
 
 
@@ -161,23 +151,22 @@ def get_next_difficulty_string(
     t_min = metrics.mean_time_diff // 60
     t_sec = metrics.mean_time_diff % 60
     if show_clock:
-        return "%d blk %.1f %% | %s -%d min" % (
-            metrics.remaining_blocks,
-            (metrics.retarget_multiplier * 100 - 100),
-            get_last_block_time_from_metrics(metrics, date_and_time=False),
-            int(metrics.last_block_seconds_ago / 60),
+        return (
+            f"{metrics.remaining_blocks} blk "
+            f"{(metrics.retarget_multiplier * 100 - 100):.1f} % | "
+            f"{get_last_block_time_from_metrics(metrics, date_and_time=False)} "
+            f"-{int(metrics.last_block_seconds_ago / 60)} min"
         )
     if retarget_date is not None:
-        return "%d blk %.2f%% %s" % (
-            metrics.remaining_blocks,
-            (metrics.retarget_multiplier * 100 - 100),
-            retarget_date.strftime("%d.%b %H:%M"),
+        return (
+            f"{metrics.remaining_blocks} blk "
+            f"{(metrics.retarget_multiplier * 100 - 100):.2f}% "
+            f"{retarget_date.strftime('%d.%b %H:%M')}"
         )
-    return "%d blk %.0f %% %d:%d" % (
-        metrics.remaining_blocks,
-        (metrics.retarget_multiplier * 100 - 100),
-        t_min,
-        t_sec,
+    return (
+        f"{metrics.remaining_blocks} blk "
+        f"{(metrics.retarget_multiplier * 100 - 100):.0f} % "
+        f"{int(t_min)}:{int(t_sec)}"
     )
 
 
@@ -225,10 +214,10 @@ def get_current_time(snapshot: MarketSnapshot) -> str:
 
 
 def get_last_block_time3(metrics: MempoolMetrics) -> str:
-    return "%s (%d:%d min ago)" % (
-        get_last_block_time_from_metrics(metrics),
-        int(metrics.last_block_seconds_ago / 60),
-        metrics.last_block_seconds_ago % 60,
+    return (
+        f"{get_last_block_time_from_metrics(metrics)} "
+        f"({int(metrics.last_block_seconds_ago / 60)}:"
+        f"{metrics.last_block_seconds_ago % 60} min ago)"
     )
 
 

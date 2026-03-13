@@ -1,4 +1,3 @@
-import math
 import time
 from datetime import datetime
 
@@ -6,31 +5,70 @@ from btcticker.domain.market_snapshot import MarketSnapshot
 from btcticker.domain.price_snapshot import PriceSnapshot
 from btcticker.layouts import (
     generate_all as build_all_layout,
+)
+from btcticker.layouts import (
     generate_big_one_row as build_big_one_row_layout,
+)
+from btcticker.layouts import (
     generate_big_two_rows as build_big_two_rows_layout,
+)
+from btcticker.layouts import (
     generate_fiat as build_fiat_layout,
+)
+from btcticker.layouts import (
     generate_fiat_height as build_fiat_height_layout,
+)
+from btcticker.layouts import (
     generate_mempool as build_mempool_layout,
+)
+from btcticker.layouts import (
     generate_ohlc as build_ohlc_layout,
+)
+from btcticker.layouts import (
     generate_one_number as build_one_number_layout,
 )
 from btcticker.layouts.common import (
     compute_mempool_metrics,
-    generate_line_str as build_token_lines,
-    get_current_block_height as current_block_height,
-    get_current_price as format_current_price,
-    get_fee_short_string as format_fee_short_string,
-    get_fee_string as format_fee_string,
-    get_fees_string as format_fees_string,
-    get_last_block_time2 as format_last_block_age,
-    get_last_block_time3 as format_last_block_time_ago,
     get_last_block_time_from_metrics,
     get_line_token_value,
+)
+from btcticker.layouts.common import (
+    generate_line_str as build_token_lines,
+)
+from btcticker.layouts.common import (
+    get_current_block_height as current_block_height,
+)
+from btcticker.layouts.common import (
+    get_current_price as format_current_price,
+)
+from btcticker.layouts.common import (
+    get_fee_short_string as format_fee_short_string,
+)
+from btcticker.layouts.common import (
+    get_fee_string as format_fee_string,
+)
+from btcticker.layouts.common import (
+    get_fees_string as format_fees_string,
+)
+from btcticker.layouts.common import (
+    get_last_block_time2 as format_last_block_age,
+)
+from btcticker.layouts.common import (
+    get_last_block_time3 as format_last_block_time_ago,
+)
+from btcticker.layouts.common import (
     get_minutes_between_blocks as format_minutes_between_blocks,
-    get_next_difficulty_string as format_next_difficulty,
+)
+from btcticker.layouts.common import (
     get_remaining_blocks as remaining_blocks_value,
+)
+from btcticker.layouts.common import (
     get_sat_per_fiat as sat_per_fiat_value,
+)
+from btcticker.layouts.common import (
     get_symbol as format_symbol,
+)
+from btcticker.layouts.common import (
     price_change_string as format_price_change_string,
 )
 from btcticker.mempool import Mempool
@@ -92,7 +130,8 @@ class Ticker:
         resolved_provider = str(resolved_provider).strip().lower()
         if resolved_provider != "pyccxt":
             raise ValueError(
-                f"Unknown price provider '{resolved_provider}'. Available providers: pyccxt"
+                f"Unknown price provider '{resolved_provider}'. "
+                "Available providers: pyccxt"
             )
 
         return PyCCXTPriceProvider(
@@ -236,23 +275,19 @@ class Ticker:
             last_block_sec_ago = 0
 
         if show_clock:
-            return "%d blk %.1f %% | %s -%d min" % (
-                remaining_blocks,
-                (retarget_mult * 100 - 100),
-                self.get_last_block_time(date_and_time=False),
-                int(last_block_sec_ago / 60),
+            return (
+                f"{remaining_blocks} blk {retarget_mult * 100 - 100:.1f} % | "
+                f"{self.get_last_block_time(date_and_time=False)} "
+                f"-{int(last_block_sec_ago / 60)} min"
             )
         if retarget_date is not None:
-            return "%d blk %.2f%% %s" % (
-                remaining_blocks,
-                (retarget_mult * 100 - 100),
-                retarget_date.strftime("%d.%b %H:%M"),
+            return (
+                f"{remaining_blocks} blk {retarget_mult * 100 - 100:.2f}% "
+                f"{retarget_date.strftime('%d.%b %H:%M')}"
             )
-        return "%d blk %.0f %% %d:%d" % (
-            remaining_blocks,
-            (retarget_mult * 100 - 100),
-            t_min,
-            t_sec,
+        return (
+            f"{remaining_blocks} blk {retarget_mult * 100 - 100:.0f} % "
+            f"{int(t_min)}:{int(t_sec)}"
         )
 
     def get_fees_string(self, mempool):

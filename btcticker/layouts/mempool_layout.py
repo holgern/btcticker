@@ -11,60 +11,57 @@ from btcticker.layouts.common import (
 )
 
 
+def _last_block_age(metrics) -> str:
+    return (
+        f"lb -{int(metrics.last_block_seconds_ago / 60)}:"
+        f"{metrics.last_block_seconds_ago % 60}"
+    )
+
+
 def generate_mempool(snapshot: MarketSnapshot, _config, mode: str) -> list[str]:
     line_str = ["", "", "", ""]
     metrics = compute_mempool_metrics(snapshot)
 
     if mode == "fiat":
         line_str[0] = get_current_price(snapshot, "fiat")
-        line_str[2] = "%s - %.0f /%s - lb -%d:%d" % (
-            get_current_block_height(metrics),
-            get_sat_per_fiat(snapshot) or 0,
-            get_symbol(snapshot),
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
+        line_str[2] = (
+            f"{get_current_block_height(metrics)} - "
+            f"{get_sat_per_fiat(snapshot) or 0:.0f} /{get_symbol(snapshot)} - "
+            f"{_last_block_age(metrics)}"
         )
     elif mode in {"height", "newblock"}:
         line_str[0] = get_current_block_height(metrics)
-        line_str[2] = "%s - %.0f /%s - lb -%d:%d" % (
-            get_current_price(snapshot, "fiat", with_symbol=True),
-            get_sat_per_fiat(snapshot) or 0,
-            get_symbol(snapshot),
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
+        line_str[2] = (
+            f"{get_current_price(snapshot, 'fiat', with_symbol=True)} - "
+            f"{get_sat_per_fiat(snapshot) or 0:.0f} /{get_symbol(snapshot)} - "
+            f"{_last_block_age(metrics)}"
         )
     elif mode == "satfiat":
         line_str[0] = get_current_price(snapshot, "sat_per_fiat", with_symbol=True)
-        line_str[2] = "%s - %s - lb -%d:%d" % (
-            get_current_price(snapshot, "fiat", with_symbol=True),
-            get_current_block_height(metrics),
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
+        line_str[2] = (
+            f"{get_current_price(snapshot, 'fiat', with_symbol=True)} - "
+            f"{get_current_block_height(metrics)} - {_last_block_age(metrics)}"
         )
     elif mode == "moscowtime":
         line_str[0] = get_current_price(snapshot, "sat_per_usd", shorten=True)
-        line_str[2] = "%s - %s - lb -%d:%d" % (
-            get_current_price(snapshot, "fiat", with_symbol=True),
-            get_current_block_height(metrics),
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
+        line_str[2] = (
+            f"{get_current_price(snapshot, 'fiat', with_symbol=True)} - "
+            f"{get_current_block_height(metrics)} - {_last_block_age(metrics)}"
         )
     elif mode == "usd":
         line_str[0] = get_current_price(snapshot, "usd")
-        line_str[2] = "%s - %s - lb -%d:%d" % (
-            get_current_price(snapshot, "fiat", with_symbol=True),
-            get_current_block_height(metrics),
-            int(metrics.last_block_seconds_ago / 60),
-            metrics.last_block_seconds_ago % 60,
+        line_str[2] = (
+            f"{get_current_price(snapshot, 'fiat', with_symbol=True)} - "
+            f"{get_current_block_height(metrics)} - {_last_block_age(metrics)}"
         )
 
     line_str[1] = get_next_difficulty_string(metrics)
     best_fees = snapshot.mempool.get("bestFees", {})
     if float(best_fees.get("hourFee", 0.0)) > 10:
-        line_str[3] = "%d %d %d" % (
-            best_fees.get("hourFee", 0),
-            best_fees.get("halfHourFee", 0),
-            best_fees.get("fastestFee", 0),
+        line_str[3] = (
+            f"{best_fees.get('hourFee', 0)} "
+            f"{best_fees.get('halfHourFee', 0)} "
+            f"{best_fees.get('fastestFee', 0)}"
         )
     else:
         line_str[3] = "{:.1f} {:.1f} {:.1f}".format(

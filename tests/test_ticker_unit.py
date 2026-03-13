@@ -33,8 +33,8 @@ def _load_ticker_module(monkeypatch):
         def get_timeseries_list(self):
             return [0.0]
 
-    setattr(fake_price_mod, "Price", StubPrice)
-    setattr(fake_price_pkg, "price", fake_price_mod)
+    fake_price_mod.Price = StubPrice
+    fake_price_pkg.price = fake_price_mod
     monkeypatch.setitem(sys.modules, "btcpriceticker", fake_price_pkg)
     monkeypatch.setitem(sys.modules, "btcpriceticker.price", fake_price_mod)
 
@@ -80,14 +80,14 @@ def _load_ticker_module(monkeypatch):
         def get_grid(self, *args, **kwargs):
             return (0, 0), (10, 10)
 
-    setattr(fake_piltext, "FontManager", StubFontManager)
-    setattr(fake_piltext, "ImageDrawer", StubImageDrawer)
-    setattr(fake_piltext, "TextGrid", StubTextGrid)
+    fake_piltext.FontManager = StubFontManager
+    fake_piltext.ImageDrawer = StubImageDrawer
+    fake_piltext.TextGrid = StubTextGrid
     monkeypatch.setitem(sys.modules, "piltext", fake_piltext)
 
     fake_chart = types.ModuleType("btcticker.chart")
-    setattr(fake_chart, "makeCandle", lambda *args, **kwargs: "candle-image")
-    setattr(fake_chart, "makeSpark", lambda *args, **kwargs: "spark-image")
+    fake_chart.makeCandle = lambda *args, **kwargs: "candle-image"
+    fake_chart.makeSpark = lambda *args, **kwargs: "spark-image"
     monkeypatch.setitem(sys.modules, "btcticker.chart", fake_chart)
 
     sys.modules.pop("btcticker.ticker", None)

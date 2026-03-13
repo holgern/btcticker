@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
 
 def _ensure_pyccxt_importable() -> None:
-    try:
-        import pyccxt  # noqa: F401
-
+    if importlib.util.find_spec("pyccxt") is not None:
         return
-    except ModuleNotFoundError:
-        pass
 
     workspace_root = Path(__file__).resolve().parents[3]
     candidate = workspace_root.parent / "pyccxt"
@@ -20,12 +18,13 @@ def _ensure_pyccxt_importable() -> None:
 
 _ensure_pyccxt_importable()
 
-from pyccxt import Exchange  # type: ignore[import-not-found]
-from pyccxt.exceptions import (  # type: ignore[import-not-found]
-    ExchangeInitializationError,
-    ExchangeNotFoundError,
-    MarketLoadError,
-)
+_pyccxt = importlib.import_module("pyccxt")
+_pyccxt_exceptions = importlib.import_module("pyccxt.exceptions")
+
+Exchange = _pyccxt.Exchange
+ExchangeInitializationError = _pyccxt_exceptions.ExchangeInitializationError
+ExchangeNotFoundError = _pyccxt_exceptions.ExchangeNotFoundError
+MarketLoadError = _pyccxt_exceptions.MarketLoadError
 
 __all__ = [
     "Exchange",

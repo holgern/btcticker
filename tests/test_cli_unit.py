@@ -21,7 +21,7 @@ def _install_fake_piltext(monkeypatch, rendered_output="rendered"):
             return ["/tmp/piltext-fonts"]
 
     fake_piltext = types.ModuleType("piltext")
-    setattr(fake_piltext, "FontManager", FakeFontManager)
+    fake_piltext.FontManager = FakeFontManager
 
     fake_ascii_art = types.ModuleType("piltext.ascii_art")
 
@@ -32,7 +32,7 @@ def _install_fake_piltext(monkeypatch, rendered_output="rendered"):
         call_data["center"] = center
         return rendered_output
 
-    setattr(fake_ascii_art, "display_readable_text", fake_display_readable_text)
+    fake_ascii_art.display_readable_text = fake_display_readable_text
 
     monkeypatch.setitem(sys.modules, "piltext", fake_piltext)
     monkeypatch.setitem(sys.modules, "piltext.ascii_art", fake_ascii_art)
@@ -57,7 +57,7 @@ def _install_fake_ticker(monkeypatch):
             return [f"mode={mode}"]
 
     fake_ticker_module = types.ModuleType("btcticker.ticker")
-    setattr(fake_ticker_module, "Ticker", FakeTicker)
+    fake_ticker_module.Ticker = FakeTicker
     monkeypatch.setitem(sys.modules, "btcticker.ticker", fake_ticker_module)
 
 
@@ -92,7 +92,7 @@ def _install_fake_image_ticker(monkeypatch, call_data):
             return FakeImage()
 
     fake_ticker_module = types.ModuleType("btcticker.ticker")
-    setattr(fake_ticker_module, "Ticker", FakeTicker)
+    fake_ticker_module.Ticker = FakeTicker
     monkeypatch.setitem(sys.modules, "btcticker.ticker", fake_ticker_module)
 
 
@@ -121,7 +121,7 @@ def test_text_command_uses_config_selected_layout(monkeypatch, capsys, tmp_path)
             return ["line a", "line b"]
 
     fake_ticker_module = types.ModuleType("btcticker.ticker")
-    setattr(fake_ticker_module, "Ticker", FakeTicker)
+    fake_ticker_module.Ticker = FakeTicker
     monkeypatch.setitem(sys.modules, "btcticker.ticker", fake_ticker_module)
 
     class FakeConfig:

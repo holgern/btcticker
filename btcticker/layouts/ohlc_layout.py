@@ -15,6 +15,13 @@ from btcticker.layouts.common import (
 )
 
 
+def _fiat_usd_sats_line(snapshot: MarketSnapshot) -> str:
+    return (
+        f"${usd_value(snapshot)} - {get_sat_per_fiat(snapshot) or 0:.0f} "
+        f"/{get_symbol(snapshot)} - {snapshot.price_snapshot.sat_per_usd or 0:.0f} /$"
+    )
+
+
 def generate_ohlc(snapshot: MarketSnapshot, _config, mode: str) -> list[str]:
     line_str = ["", "", "", "", "", "", ""]
     metrics = compute_mempool_metrics(snapshot)
@@ -22,23 +29,13 @@ def generate_ohlc(snapshot: MarketSnapshot, _config, mode: str) -> list[str]:
     if mode == "fiat":
         line_str[0] = get_current_block_height(metrics)
         line_str[1] = get_last_block_time3(metrics)
-        line_str[4] = "$%s - %.0f /%s - %.0f /$" % (
-            usd_value(snapshot),
-            get_sat_per_fiat(snapshot) or 0,
-            get_symbol(snapshot),
-            snapshot.price_snapshot.sat_per_usd or 0,
-        )
+        line_str[4] = _fiat_usd_sats_line(snapshot)
         line_str[5] = price_change_string(snapshot, get_symbol(snapshot))
         line_str[6] = get_current_price(snapshot, "fiat")
     elif mode in {"height", "newblock"}:
         line_str[0] = get_current_price(snapshot, "fiat", with_symbol=True)
         line_str[1] = get_last_block_time3(metrics)
-        line_str[4] = "$%s - %.0f /%s - %.0f /$" % (
-            usd_value(snapshot),
-            get_sat_per_fiat(snapshot) or 0,
-            get_symbol(snapshot),
-            snapshot.price_snapshot.sat_per_usd or 0,
-        )
+        line_str[4] = _fiat_usd_sats_line(snapshot)
         line_str[5] = price_change_string(snapshot, "")
         line_str[6] = get_current_block_height(metrics)
     elif mode == "satfiat":
@@ -71,11 +68,9 @@ def generate_ohlc(snapshot: MarketSnapshot, _config, mode: str) -> list[str]:
         line_str[4] = (
             get_symbol(snapshot)
             + get_current_price(snapshot, "fiat")
-            + " - %.0f /%s - %.0f /$"
-            % (
-                get_sat_per_fiat(snapshot) or 0,
-                get_symbol(snapshot),
-                snapshot.price_snapshot.sat_per_usd or 0,
+            + (
+                f" - {get_sat_per_fiat(snapshot) or 0:.0f} /{get_symbol(snapshot)}"
+                f" - {snapshot.price_snapshot.sat_per_usd or 0:.0f} /$"
             )
         )
         line_str[5] = price_change_string(snapshot, "$")

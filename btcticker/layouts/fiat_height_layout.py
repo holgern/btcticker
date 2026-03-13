@@ -14,6 +14,13 @@ from btcticker.layouts.common import (
 )
 
 
+def _fiat_and_usd_line(snapshot: MarketSnapshot) -> str:
+    return (
+        f"{get_sat_per_fiat(snapshot) or 0:.0f} /{get_symbol(snapshot)} - "
+        f"${usd_value(snapshot)} - {snapshot.price_snapshot.sat_per_usd or 0:.0f} /$"
+    )
+
+
 def generate_fiat_height(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
     line_str = ["", "", "", "", ""]
     metrics = compute_mempool_metrics(snapshot)
@@ -24,24 +31,14 @@ def generate_fiat_height(snapshot: MarketSnapshot, config, mode: str) -> list[st
         if fiat_is_usd:
             line_str[3] = get_current_price(snapshot, "sat_per_fiat", with_symbol=True)
         else:
-            line_str[3] = "{:.0f} /{} - ${} - {:.0f} /$".format(
-                get_sat_per_fiat(snapshot) or 0,
-                get_symbol(snapshot),
-                usd_value(snapshot),
-                snapshot.price_snapshot.sat_per_usd or 0,
-            )
+            line_str[3] = _fiat_and_usd_line(snapshot)
         line_str[4] = get_current_price(snapshot, "fiat", with_symbol=True)
     elif mode in {"height", "newblock"}:
         line_str[0] = get_current_price(snapshot, "fiat", with_symbol=True)
         if fiat_is_usd:
             line_str[3] = get_current_price(snapshot, "sat_per_fiat", with_symbol=True)
         else:
-            line_str[3] = "{:.0f} /{} - ${} - {:.0f} /$".format(
-                get_sat_per_fiat(snapshot) or 0,
-                get_symbol(snapshot),
-                usd_value(snapshot),
-                snapshot.price_snapshot.sat_per_usd or 0,
-            )
+            line_str[3] = _fiat_and_usd_line(snapshot)
         line_str[4] = get_current_block_height(metrics)
     elif mode == "satfiat":
         line_str[0] = get_current_block_height(metrics)

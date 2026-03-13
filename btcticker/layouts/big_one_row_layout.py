@@ -8,7 +8,6 @@ from btcticker.layouts.common import (
     get_current_price,
     get_current_time,
     get_fee_string,
-    get_fees_string,
     get_last_block_time2,
     get_last_block_time_from_metrics,
     get_minutes_between_blocks,
@@ -17,19 +16,27 @@ from btcticker.layouts.common import (
 )
 
 
+def _header(left: str, metrics, snapshot: MarketSnapshot) -> str:
+    return (
+        f"{left} - {get_remaining_blocks(metrics)} - "
+        f"{get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}"
+    )
+
+
+def _block_time_header(left: str, metrics) -> str:
+    return (
+        f"{left} - {get_last_block_time_from_metrics(metrics)} - "
+        f"{get_last_block_time2(metrics)}"
+    )
+
+
 def generate_big_one_row(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
     metrics = compute_mempool_metrics(snapshot)
     lines = {
         "fiat": [
             (
                 "t",
-                "%s - %d - %s - %s"
-                % (
-                    get_current_block_height(metrics),
-                    get_remaining_blocks(metrics),
-                    get_minutes_between_blocks(metrics),
-                    get_current_time(snapshot),
-                ),
+                _header(get_current_block_height(metrics), metrics, snapshot),
             ),
             ("n", ""),
             (
@@ -44,12 +51,10 @@ def generate_big_one_row(snapshot: MarketSnapshot, config, mode: str) -> list[st
         "height": [
             (
                 "t",
-                "%s - %d - %s - %s"
-                % (
+                _header(
                     get_current_price(snapshot, "fiat", with_symbol=True),
-                    get_remaining_blocks(metrics),
-                    get_minutes_between_blocks(metrics),
-                    get_current_time(snapshot),
+                    metrics,
+                    snapshot,
                 ),
             ),
             ("n", ""),
@@ -60,13 +65,7 @@ def generate_big_one_row(snapshot: MarketSnapshot, config, mode: str) -> list[st
         "satfiat": [
             (
                 "t",
-                "%s - %d - %s - %s"
-                % (
-                    get_current_block_height(metrics),
-                    get_remaining_blocks(metrics),
-                    get_minutes_between_blocks(metrics),
-                    get_current_time(snapshot),
-                ),
+                _header(get_current_block_height(metrics), metrics, snapshot),
             ),
             ("n", ""),
             (
@@ -80,13 +79,7 @@ def generate_big_one_row(snapshot: MarketSnapshot, config, mode: str) -> list[st
         "moscowtime": [
             (
                 "t",
-                "%s - %d - %s - %s"
-                % (
-                    get_current_block_height(metrics),
-                    get_remaining_blocks(metrics),
-                    get_minutes_between_blocks(metrics),
-                    get_current_time(snapshot),
-                ),
+                _header(get_current_block_height(metrics), metrics, snapshot),
             ),
             ("n", ""),
             ("t", "/$ " + get_fee_string(snapshot, config.show_best_fees)),
@@ -96,13 +89,7 @@ def generate_big_one_row(snapshot: MarketSnapshot, config, mode: str) -> list[st
         "usd": [
             (
                 "t",
-                "%s - %d - %s - %s"
-                % (
-                    get_current_block_height(metrics),
-                    get_remaining_blocks(metrics),
-                    get_minutes_between_blocks(metrics),
-                    get_current_time(snapshot),
-                ),
+                _header(get_current_block_height(metrics), metrics, snapshot),
             ),
             ("n", ""),
             ("t", "$ " + get_fee_string(snapshot, config.show_best_fees)),
@@ -114,27 +101,26 @@ def generate_big_one_row(snapshot: MarketSnapshot, config, mode: str) -> list[st
     if config.show_block_time:
         lines["fiat"][0] = (
             "t",
-            f"{get_current_block_height(metrics)} - {get_last_block_time_from_metrics(metrics)} - {get_last_block_time2(metrics)}",
+            _block_time_header(get_current_block_height(metrics), metrics),
         )
         lines["height"][0] = (
             "t",
-            "{} - {} - {}".format(
+            _block_time_header(
                 get_current_price(snapshot, "fiat", with_symbol=True),
-                get_last_block_time_from_metrics(metrics),
-                get_last_block_time2(metrics),
+                metrics,
             ),
         )
         lines["satfiat"][0] = (
             "t",
-            f"{get_current_block_height(metrics)} - {get_last_block_time_from_metrics(metrics)} - {get_last_block_time2(metrics)}",
+            _block_time_header(get_current_block_height(metrics), metrics),
         )
         lines["moscowtime"][0] = (
             "t",
-            f"{get_current_block_height(metrics)} - {get_last_block_time_from_metrics(metrics)} - {get_last_block_time2(metrics)}",
+            _block_time_header(get_current_block_height(metrics), metrics),
         )
         lines["usd"][0] = (
             "t",
-            f"{get_current_block_height(metrics)} - {get_last_block_time_from_metrics(metrics)} - {get_last_block_time2(metrics)}",
+            _block_time_header(get_current_block_height(metrics), metrics),
         )
 
     lines["newblock"] = lines["height"]

@@ -9,11 +9,40 @@ from btcticker.layouts.common import (
     get_fees_string,
     get_last_block_time_from_metrics,
     get_minutes_between_blocks,
-    get_symbol,
     get_remaining_blocks,
+    get_symbol,
     price_change_string,
     sat_per_usd_value,
 )
+
+
+def _newblock_count_line(metrics) -> str:
+    return f"{metrics.mempool_blocks} blks {metrics.mempool_count} txs"
+
+
+def _newblock_difficulty_line(metrics) -> str:
+    remaining_blocks = get_remaining_blocks(metrics)
+    multiplier = metrics.retarget_multiplier * 100 - 100
+    if metrics.retarget_date is not None:
+        return (
+            f"{remaining_blocks} blk {multiplier:.1f}% "
+            f"{metrics.retarget_date.strftime('%d.%b%H:%M')}"
+        )
+    return f"{remaining_blocks} blk {multiplier:.1f}%"
+
+
+def _block_time_header(left: str, metrics) -> str:
+    return (
+        f"{left}-"
+        f"{get_last_block_time_from_metrics(metrics, date_and_time=False)}-"
+        f"{int(metrics.last_block_seconds_ago / 60)} min"
+    )
+
+
+def _clock_header(snapshot: MarketSnapshot, left: str, metrics) -> str:
+    return (
+        f"{left} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}"
+    )
 
 
 def generate_all(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
@@ -21,38 +50,25 @@ def generate_all(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
     metrics = compute_mempool_metrics(snapshot)
 
     if mode == "newblock":
-        line_str[0] = "%s - %s - %s" % (
+        line_str[0] = _clock_header(
+            snapshot,
             get_current_price(snapshot, "fiat", with_symbol=True),
-            get_minutes_between_blocks(metrics),
-            get_current_time(snapshot),
+            metrics,
         )
         line_str[1] = get_fees_string(snapshot, config.show_best_fees)
-        line_str[2] = "%d blks %d txs" % (metrics.mempool_blocks, metrics.mempool_count)
-        if metrics.retarget_date is not None:
-            line_str[3] = "%d blk %.1f%% %s" % (
-                get_remaining_blocks(metrics),
-                (metrics.retarget_multiplier * 100 - 100),
-                metrics.retarget_date.strftime("%d.%b%H:%M"),
-            )
-        else:
-            line_str[3] = "%d blk %.1f%%" % (
-                get_remaining_blocks(metrics),
-                (metrics.retarget_multiplier * 100 - 100),
-            )
+        line_str[2] = _newblock_count_line(metrics)
+        line_str[3] = _newblock_difficulty_line(metrics)
         line_str[4] = get_current_block_height(metrics)
         return line_str
 
     if mode == "fiat":
         if config.show_block_time:
-            line_str[0] = "%s-%s-%d min" % (
-                get_current_block_height(metrics),
-                get_last_block_time_from_metrics(metrics, date_and_time=False),
-                int(metrics.last_block_seconds_ago / 60),
-            )
+            line_str[0] = _block_time_header(get_current_block_height(metrics), metrics)
         else:
-            line_str[0] = (
-                f"{get_current_block_height(metrics)} - {get_minutes_between_blocks(metrics)} - "
-                f"{get_current_time(snapshot)}"
+            line_str[0] = _clock_header(
+                snapshot,
+                get_current_block_height(metrics),
+                metrics,
             )
         line_str[2] = f"${get_current_price(snapshot, 'usd')}"
         line_str[3] = get_current_price(snapshot, "sat_per_usd")
@@ -61,16 +77,15 @@ def generate_all(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
         line_str[7] = get_current_price(snapshot, "fiat")
     elif mode == "height":
         if config.show_block_time:
-            line_str[0] = "%s-%s-%d min" % (
+            line_str[0] = _block_time_header(
                 get_current_price(snapshot, "fiat", with_symbol=True),
-                get_last_block_time_from_metrics(metrics, date_and_time=False),
-                int(metrics.last_block_seconds_ago / 60),
+                metrics,
             )
         else:
-            line_str[0] = "{} - {} - {}".format(
+            line_str[0] = _clock_header(
+                snapshot,
                 get_current_price(snapshot, "fiat", with_symbol=True),
-                get_minutes_between_blocks(metrics),
-                get_current_time(snapshot),
+                metrics,
             )
         line_str[2] = f"${get_current_price(snapshot, 'usd')}"
         line_str[3] = get_current_price(snapshot, "sat_per_usd")
@@ -78,15 +93,12 @@ def generate_all(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
         line_str[7] = get_current_block_height(metrics)
     elif mode == "satfiat":
         if config.show_block_time:
-            line_str[0] = "%s-%s-%d min" % (
-                get_current_block_height(metrics),
-                get_last_block_time_from_metrics(metrics, date_and_time=False),
-                int(metrics.last_block_seconds_ago / 60),
-            )
+            line_str[0] = _block_time_header(get_current_block_height(metrics), metrics)
         else:
-            line_str[0] = (
-                f"{get_current_block_height(metrics)} - {get_minutes_between_blocks(metrics)} - "
-                f"{get_current_time(snapshot)}"
+            line_str[0] = _clock_header(
+                snapshot,
+                get_current_block_height(metrics),
+                metrics,
             )
         line_str[2] = f"${get_current_price(snapshot, 'usd')}"
         line_str[3] = get_current_price(snapshot, "sat_per_usd")
@@ -98,15 +110,12 @@ def generate_all(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
         return line_str
     elif mode == "moscowtime":
         if config.show_block_time:
-            line_str[0] = "%s-%s-%d min" % (
-                get_current_block_height(metrics),
-                get_last_block_time_from_metrics(metrics, date_and_time=False),
-                int(metrics.last_block_seconds_ago / 60),
-            )
+            line_str[0] = _block_time_header(get_current_block_height(metrics), metrics)
         else:
-            line_str[0] = (
-                f"{get_current_block_height(metrics)} - {get_minutes_between_blocks(metrics)} - "
-                f"{get_current_time(snapshot)}"
+            line_str[0] = _clock_header(
+                snapshot,
+                get_current_block_height(metrics),
+                metrics,
             )
         line_str[2] = get_current_price(snapshot, "usd", with_symbol=True)
         line_str[3] = get_current_price(
@@ -120,15 +129,12 @@ def generate_all(snapshot: MarketSnapshot, config, mode: str) -> list[str]:
         line_str[7] = sat_per_usd_value(snapshot)
     elif mode == "usd":
         if config.show_block_time:
-            line_str[0] = "%s-%s-%d min" % (
-                get_current_block_height(metrics),
-                get_last_block_time_from_metrics(metrics, date_and_time=False),
-                int(metrics.last_block_seconds_ago / 60),
-            )
+            line_str[0] = _block_time_header(get_current_block_height(metrics), metrics)
         else:
-            line_str[0] = (
-                f"{get_current_block_height(metrics)} - {get_minutes_between_blocks(metrics)} - "
-                f"{get_current_time(snapshot)}"
+            line_str[0] = _clock_header(
+                snapshot,
+                get_current_block_height(metrics),
+                metrics,
             )
         line_str[2] = get_current_price(snapshot, "fiat", with_symbol=True)
         line_str[3] = get_current_price(snapshot, "sat_per_usd")

@@ -4,14 +4,13 @@ from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Any
 
+from btcticker.domain.price_snapshot import PriceSnapshot
 from btcticker.providers._pyccxt_compat import (
     Exchange,
     ExchangeInitializationError,
     ExchangeNotFoundError,
     MarketLoadError,
 )
-
-from btcticker.domain.price_snapshot import PriceSnapshot
 from btcticker.providers.base import (
     PriceHistoryUnavailableError,
     PriceMarketNotFoundError,
@@ -281,7 +280,9 @@ class PyCCXTPriceProvider:
     def _normalize_interval(interval: str) -> str:
         normalized = INTERVAL_ALIASES.get(interval, interval)
         if normalized not in INTERVAL_ALIASES.values():
+            supported_values = ", ".join(sorted(INTERVAL_ALIASES))
             raise PriceProviderError(
-                f"Unsupported interval '{interval}'. Supported values: {', '.join(sorted(INTERVAL_ALIASES))}"
+                f"Unsupported interval '{interval}'. "
+                f"Supported values: {supported_values}"
             )
         return normalized

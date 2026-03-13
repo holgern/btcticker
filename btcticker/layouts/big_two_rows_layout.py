@@ -13,6 +13,12 @@ from btcticker.layouts.common import (
 )
 
 
+def _price_header(snapshot: MarketSnapshot, left: str, metrics) -> str:
+    return (
+        f"{left} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}"
+    )
+
+
 def generate_big_two_rows(snapshot: MarketSnapshot, _config, mode: str) -> list[str]:
     metrics = compute_mempool_metrics(snapshot)
     price_parts = (snapshot.price_now or "n/a").split(",")
@@ -25,10 +31,7 @@ def generate_big_two_rows(snapshot: MarketSnapshot, _config, mode: str) -> list[
         "fiat": [
             ("t", get_symbol(snapshot) + left),
             ("n", ""),
-            (
-                "t",
-                f"{get_current_block_height(metrics)} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
-            ),
+            ("t", _price_header(snapshot, get_current_block_height(metrics), metrics)),
             ("n", ""),
             ("t", right),
         ],
@@ -37,7 +40,11 @@ def generate_big_two_rows(snapshot: MarketSnapshot, _config, mode: str) -> list[
             ("n", ""),
             (
                 "t",
-                f"{get_current_price(snapshot, 'fiat', with_symbol=True).replace(get_symbol(snapshot) + left + right, get_symbol(snapshot) + (snapshot.price_now or 'n/a')) if right else get_current_price(snapshot, 'fiat', with_symbol=True)} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
+                _price_header(
+                    snapshot,
+                    get_current_price(snapshot, "fiat", with_symbol=True),
+                    metrics,
+                ),
             ),
             ("n", ""),
             ("t", get_current_block_height(metrics)[3:]),
@@ -47,7 +54,8 @@ def generate_big_two_rows(snapshot: MarketSnapshot, _config, mode: str) -> list[
             ("n", ""),
             (
                 "t",
-                f"{get_symbol(snapshot) + (snapshot.price_now or 'n/a')} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
+                f"{get_symbol(snapshot)}{snapshot.price_now or 'n/a'} - "
+                f"{get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
             ),
             ("n", ""),
             ("t", get_current_price(snapshot, "sat_per_fiat")),
@@ -57,7 +65,8 @@ def generate_big_two_rows(snapshot: MarketSnapshot, _config, mode: str) -> list[
             ("n", ""),
             (
                 "t",
-                f"{get_symbol(snapshot) + (snapshot.price_now or 'n/a')} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
+                f"{get_symbol(snapshot)}{snapshot.price_now or 'n/a'} - "
+                f"{get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
             ),
             ("n", ""),
             ("t", get_current_price(snapshot, "moscow_time_usd")),
@@ -65,10 +74,7 @@ def generate_big_two_rows(snapshot: MarketSnapshot, _config, mode: str) -> list[
         "usd": [
             ("t", "$" + usd_left),
             ("n", ""),
-            (
-                "t",
-                f"{get_current_block_height(metrics)} - {get_minutes_between_blocks(metrics)} - {get_current_time(snapshot)}",
-            ),
+            ("t", _price_header(snapshot, get_current_block_height(metrics), metrics)),
             ("n", ""),
             ("t", usd_right or right),
         ],

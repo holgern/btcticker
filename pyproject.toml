@@ -18,7 +18,9 @@ requires-python = ">3.8.0"
 dependencies = [
     "piltext",
     "pymempool",
-    "pyccxt"
+    "pyccxt",
+    "rich",
+    "typer"
 ]
 license = {file = "LICENSE"}
 classifiers=[

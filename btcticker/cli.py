@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-import argparse
 import os
 import shlex
 import shutil
 import subprocess
-from configparser import ConfigParser
+import sys
 from collections.abc import Iterable
+from configparser import ConfigParser
 from pathlib import Path
+from typing import Annotated
+
+import click
+import typer
+from rich import box
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 from btcticker.config import Config, FontsConfig, MainConfig
 from btcticker.font_sources import (
@@ -80,6 +88,29 @@ LAYOUT_SPECS = {
     },
 }
 
+DEFAULT_CONSOLE_WIDTH = 200
+
+ConfigPathOption = Annotated[
+    str | None,
+    typer.Option("--config", help="Path to config.ini"),
+]
+LocalOption = Annotated[
+    bool,
+    typer.Option("--local", help=f"Use local ./{LOCAL_CONFIG_FILENAME}"),
+]
+GlobalOption = Annotated[
+    bool,
+    typer.Option("--global", help=f"Use global ~/{GLOBAL_CONFIG_SUFFIX}"),
+]
+
+app = typer.Typer(pretty_exceptions_enable=False)
+config_app = typer.Typer(
+    help="Show or manage btcticker config files",
+    invoke_without_command=True,
+    pretty_exceptions_enable=False,
+)
+app.add_typer(config_app, name="config")
+
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -116,6 +147,9 @@ def _resolve_config_path(
     require_exists: bool,
     strict_local: bool,
 ) -> Path:
+    if sum(bool(value) for value in (selected_path, use_local, use_global)) > 1:
+        raise ValueError("Use only one of --config, --local, or --global")
+
     if selected_path:
         config_path = Path(selected_path).expanduser()
     elif use_local:
@@ -233,24 +267,29 @@ def _generate_lines(ticker, layout: str, mode: str) -> list[str]:
     return generate(mode)
 
 
-def _format_table(headers: list[str], rows: list[list[str]]) -> str:
-    widths = [len(header) for header in headers]
+def _console(*, stderr: bool = False) -> Console:
+    return Console(stderr=stderr, width=DEFAULT_CONSOLE_WIDTH)
+
+
+def _build_table(headers: list[str], rows: list[list[str]]) -> Table:
+    table = Table(box=box.ASCII, header_style="bold")
+    for header in headers:
+        table.add_column(header, no_wrap=True)
     for row in rows:
-        for index, value in enumerate(row):
-            widths[index] = max(widths[index], len(value))
-
-    header_line = " | ".join(
-        header.ljust(widths[index]) for index, header in enumerate(headers)
-    )
-    separator = "-+-".join("-" * width for width in widths)
-    body_lines = [
-        " | ".join(value.ljust(widths[index]) for index, value in enumerate(row))
-        for row in rows
-    ]
-    return "\n".join([header_line, separator, *body_lines])
+        table.add_row(*row)
+    return table
 
 
-def _run_layouts(_args: argparse.Namespace) -> int:
+def _render_text_output(output: str, console: Console) -> None:
+    if console.is_terminal:
+        with Live(console=console, auto_refresh=False) as live:
+            live.update(output, refresh=True)
+        return
+
+    console.print(output, highlight=False, markup=False, soft_wrap=True)
+
+
+def _run_layouts() -> int:
     default_layouts = _split_csv(MainConfig().layout_list)
     default_positions = {name: str(index) for index, name in enumerate(default_layouts)}
 
@@ -278,7 +317,7 @@ def _run_layouts(_args: argparse.Namespace) -> int:
             ]
         )
 
-    print(_format_table(headers, rows))
+    _console().print(_build_table(headers, rows))
     return 0
 
 
@@ -332,18 +371,23 @@ def _config_value_rows(config_path: Path) -> list[list[str]]:
     return rows
 
 
-def _run_config_show(args: argparse.Namespace) -> int:
+def _run_config_show(*, use_local_config: bool, use_global_config: bool) -> int:
     config_path = _resolve_config_path(
         selected_path=None,
-        use_local=args.use_local_config,
-        use_global=args.use_global_config,
+        use_local=use_local_config,
+        use_global=use_global_config,
         require_exists=False,
         strict_local=True,
     )
-    print(f"Config path: {config_path}")
-    print(f"Exists: {'yes' if config_path.exists() else 'no'}")
-    print(
-        _format_table(
+    console = _console()
+    console.print(f"Config path: {config_path}", highlight=False, markup=False)
+    console.print(
+        f"Exists: {'yes' if config_path.exists() else 'no'}",
+        highlight=False,
+        markup=False,
+    )
+    console.print(
+        _build_table(
             headers=["section", "key", "value", "source"],
             rows=_config_value_rows(config_path),
         )
@@ -351,11 +395,11 @@ def _run_config_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_config_create(args: argparse.Namespace) -> int:
+def _run_config_create(*, use_local_config: bool, use_global_config: bool) -> int:
     config_path = _resolve_config_path(
         selected_path=None,
-        use_local=args.use_local_config,
-        use_global=args.use_global_config,
+        use_local=use_local_config,
+        use_global=use_global_config,
         require_exists=False,
         strict_local=False,
     )
@@ -367,15 +411,17 @@ def _run_config_create(args: argparse.Namespace) -> int:
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(_build_default_config_text(), encoding="utf-8")
-    print(f"Created config file: {config_path}")
+    _console().print(
+        f"Created config file: {config_path}", highlight=False, markup=False
+    )
     return 0
 
 
-def _run_config_edit(args: argparse.Namespace) -> int:
+def _run_config_edit(*, use_local_config: bool, use_global_config: bool) -> int:
     config_path = _resolve_config_path(
         selected_path=None,
-        use_local=args.use_local_config,
-        use_global=args.use_global_config,
+        use_local=use_local_config,
+        use_global=use_global_config,
         require_exists=True,
         strict_local=True,
     )
@@ -387,229 +433,315 @@ def _run_config_edit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_config(args: argparse.Namespace) -> int:
-    if args.config_action == "edit":
-        return _run_config_edit(args)
-    if args.config_action == "create":
-        return _run_config_create(args)
-    return _run_config_show(args)
-
-
-def _run_text(args: argparse.Namespace) -> int:
+def _run_text(
+    *,
+    config: str | None,
+    use_local_config: bool,
+    use_global_config: bool,
+    layout: str | None,
+    mode: str | None,
+    days: int | None,
+    width: int,
+    line_spacing: int,
+    no_center: bool,
+    header: bool,
+) -> int:
     from piltext.ascii_art import display_readable_text
 
     config_path = _resolve_config_path(
-        selected_path=args.config,
-        use_local=args.use_local_config,
-        use_global=args.use_global_config,
+        selected_path=config,
+        use_local=use_local_config,
+        use_global=use_global_config,
         require_exists=True,
         strict_local=True,
     )
-    config = Config(path=str(config_path))
-    mode = _resolve_mode(config, args.mode)
-    layout = _resolve_layout(config, args.layout)
-    days = _resolve_days(config, args.days)
+    config_obj = Config(path=str(config_path))
+    mode = _resolve_mode(config_obj, mode)
+    layout = _resolve_layout(config_obj, layout)
+    days = _resolve_days(config_obj, days)
 
-    ticker = _build_ticker(config, days)
+    ticker = _build_ticker(config_obj, days)
     lines = _generate_lines(ticker, layout, mode)
+    console = _console()
 
-    if args.header:
-        print(f"layout={layout} mode={mode} days={days}")
+    if header:
+        console.print(
+            f"layout={layout} mode={mode} days={days}", highlight=False, markup=False
+        )
 
     output = display_readable_text(
         lines,
-        width=args.width,
-        line_spacing=args.line_spacing,
-        center=not args.no_center,
+        width=width,
+        line_spacing=line_spacing,
+        center=not no_center,
     )
-    print(output)
+    _render_text_output(output, console)
     return 0
 
 
-def _run_image(args: argparse.Namespace) -> int:
+def _run_image(
+    *,
+    config: str | None,
+    use_local_config: bool,
+    use_global_config: bool,
+    layout: str | None,
+    mode: str | None,
+    days: int | None,
+    output: str,
+) -> int:
     config_path = _resolve_config_path(
-        selected_path=args.config,
-        use_local=args.use_local_config,
-        use_global=args.use_global_config,
+        selected_path=config,
+        use_local=use_local_config,
+        use_global=use_global_config,
         require_exists=True,
         strict_local=True,
     )
-    config = Config(path=str(config_path))
-    mode = _resolve_mode(config, args.mode)
-    layout = _resolve_layout(config, args.layout)
-    days = _resolve_days(config, args.days)
+    config_obj = Config(path=str(config_path))
+    mode = _resolve_mode(config_obj, mode)
+    layout = _resolve_layout(config_obj, layout)
+    days = _resolve_days(config_obj, days)
 
-    ticker = _build_ticker(config, days)
+    ticker = _build_ticker(config_obj, days)
     ticker.build(mode=mode, layout=layout, mirror=True)
 
-    output_path = Path(args.output).expanduser()
+    output_path = Path(output).expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ticker.get_image().save(output_path, format="PNG")
-    print(f"Saved image to: {output_path}")
+    _console().print(f"Saved image to: {output_path}", highlight=False, markup=False)
     return 0
 
 
-def _run_download(args: argparse.Namespace) -> int:
+def _run_download(
+    *,
+    fontdir: str | None,
+    url: str | None,
+    part1: str | None,
+    part2: str | None,
+    font_name: str | None,
+) -> int:
     from piltext import FontManager
 
-    font_manager = FontManager(fontdirs=args.fontdir) if args.fontdir else FontManager()
+    font_manager = FontManager(fontdirs=fontdir) if fontdir else FontManager()
+    console = _console()
 
-    if args.url and any([args.part1, args.part2, args.font_name]):
+    if url and any([part1, part2, font_name]):
         raise ValueError("Use either --url or --part1/--part2/--font-name")
 
-    if args.url:
-        font_path = download_font_url(args.url, font_manager)
-        print(f"Downloaded font from URL: {font_path}")
-    elif any([args.part1, args.part2, args.font_name]):
-        if not all([args.part1, args.part2, args.font_name]):
+    if url:
+        font_path = download_font_url(url, font_manager)
+        console.print(
+            f"Downloaded font from URL: {font_path}", highlight=False, markup=False
+        )
+    elif any([part1, part2, font_name]):
+        if not all([part1, part2, font_name]):
             raise ValueError(
                 "--part1, --part2 and --font-name must be provided together"
             )
+        assert part1 is not None
+        assert part2 is not None
+        assert font_name is not None
         font_path = download_google_font(
-            args.part1,
-            args.part2,
-            args.font_name,
+            part1,
+            part2,
+            font_name,
             font_manager,
         )
-        print(f"Downloaded Google Font: {font_path}")
+        console.print(
+            f"Downloaded Google Font: {font_path}", highlight=False, markup=False
+        )
     else:
         downloaded = ensure_default_fonts(font_manager)
         if downloaded:
-            print("Downloaded default btcticker fonts:")
+            console.print(
+                "Downloaded default btcticker fonts:", highlight=False, markup=False
+            )
             for font_name in downloaded:
-                print(f"- {font_name}")
+                console.print(f"- {font_name}", highlight=False, markup=False)
         else:
-            print("All default btcticker fonts are already installed")
+            console.print(
+                "All default btcticker fonts are already installed",
+                highlight=False,
+                markup=False,
+            )
 
     directories = ", ".join(font_manager.list_font_directories())
-    print(f"Font directories: {directories}")
+    console.print(f"Font directories: {directories}", highlight=False, markup=False)
     return 0
 
 
-def _add_scope_options(
-    parser: argparse.ArgumentParser, include_config_path: bool
-) -> None:
-    scope_group = parser.add_mutually_exclusive_group()
-    if include_config_path:
-        scope_group.add_argument("--config", help="Path to config.ini")
-    scope_group.add_argument(
-        "--local",
-        dest="use_local_config",
-        action="store_true",
-        help=f"Use local ./{LOCAL_CONFIG_FILENAME}",
+@app.command(help="Render ticker text output for a layout")
+def text(
+    config: ConfigPathOption = None,
+    use_local_config: LocalOption = False,
+    use_global_config: GlobalOption = False,
+    layout: Annotated[
+        str | None, typer.Option("--layout", help="Layout to render")
+    ] = None,
+    mode: Annotated[
+        str | None, typer.Option("--mode", help="Ticker mode to render")
+    ] = None,
+    days: Annotated[
+        int | None, typer.Option("--days", help="Days ago for price history")
+    ] = None,
+    width: Annotated[int, typer.Option("--width", help="Output width")] = 80,
+    line_spacing: Annotated[
+        int,
+        typer.Option("--line-spacing", help="Blank lines between text rows"),
+    ] = 1,
+    no_center: Annotated[
+        bool,
+        typer.Option("--no-center", help="Disable centered text output"),
+    ] = False,
+    header: Annotated[
+        bool,
+        typer.Option("--header", help="Show layout/mode header before output"),
+    ] = False,
+) -> int:
+    return _run_text(
+        config=config,
+        use_local_config=use_local_config,
+        use_global_config=use_global_config,
+        layout=layout,
+        mode=mode,
+        days=days,
+        width=width,
+        line_spacing=line_spacing,
+        no_center=no_center,
+        header=header,
     )
-    scope_group.add_argument(
-        "--global",
-        dest="use_global_config",
-        action="store_true",
-        help=f"Use global ~/{GLOBAL_CONFIG_SUFFIX}",
+
+
+@app.command(help="Render and save ticker as PNG image")
+def image(
+    config: ConfigPathOption = None,
+    use_local_config: LocalOption = False,
+    use_global_config: GlobalOption = False,
+    layout: Annotated[
+        str | None, typer.Option("--layout", help="Layout to render")
+    ] = None,
+    mode: Annotated[
+        str | None, typer.Option("--mode", help="Ticker mode to render")
+    ] = None,
+    days: Annotated[
+        int | None, typer.Option("--days", help="Days ago for price history")
+    ] = None,
+    output: Annotated[
+        str,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output PNG file path (default: btcticker.png)",
+        ),
+    ] = "btcticker.png",
+) -> int:
+    return _run_image(
+        config=config,
+        use_local_config=use_local_config,
+        use_global_config=use_global_config,
+        layout=layout,
+        mode=mode,
+        days=days,
+        output=output,
     )
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="btcticker")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    text_parser = subparsers.add_parser(
-        "text",
-        help="Render ticker text output for a layout",
-    )
-    _add_scope_options(text_parser, include_config_path=True)
-    text_parser.add_argument("--layout", help="Layout to render")
-    text_parser.add_argument("--mode", help="Ticker mode to render")
-    text_parser.add_argument("--days", type=int, help="Days ago for price history")
-    text_parser.add_argument("--width", type=int, default=80, help="Output width")
-    text_parser.add_argument(
-        "--line-spacing",
-        type=int,
-        default=1,
-        help="Blank lines between text rows",
-    )
-    text_parser.add_argument(
-        "--no-center",
-        action="store_true",
-        help="Disable centered text output",
-    )
-    text_parser.add_argument(
-        "--header",
-        action="store_true",
-        help="Show layout/mode header before output",
-    )
-
-    image_parser = subparsers.add_parser(
-        "image",
-        help="Render and save ticker as PNG image",
-    )
-    _add_scope_options(image_parser, include_config_path=True)
-    image_parser.add_argument("--layout", help="Layout to render")
-    image_parser.add_argument("--mode", help="Ticker mode to render")
-    image_parser.add_argument("--days", type=int, help="Days ago for price history")
-    image_parser.add_argument(
-        "--output",
-        "-o",
-        default="btcticker.png",
-        help="Output PNG file path (default: btcticker.png)",
+@app.command(help="Download fonts to user font storage")
+def download(
+    fontdir: Annotated[
+        str | None,
+        typer.Option(
+            "--fontdir",
+            help="Custom font directory (defaults to piltext user directory)",
+        ),
+    ] = None,
+    url: Annotated[
+        str | None, typer.Option("--url", help="Direct URL to a font file")
+    ] = None,
+    part1: Annotated[
+        str | None,
+        typer.Option("--part1", help="Google Fonts category (e.g. ofl)"),
+    ] = None,
+    part2: Annotated[
+        str | None,
+        typer.Option("--part2", help="Google Fonts family (e.g. roboto)"),
+    ] = None,
+    font_name: Annotated[
+        str | None,
+        typer.Option("--font-name", help="Google Fonts file name"),
+    ] = None,
+) -> int:
+    return _run_download(
+        fontdir=fontdir,
+        url=url,
+        part1=part1,
+        part2=part2,
+        font_name=font_name,
     )
 
-    download_parser = subparsers.add_parser(
-        "download",
-        help="Download fonts to user font storage",
-    )
-    download_parser.add_argument(
-        "--fontdir",
-        help="Custom font directory (defaults to piltext user directory)",
-    )
-    download_parser.add_argument("--url", help="Direct URL to a font file")
-    download_parser.add_argument("--part1", help="Google Fonts category (e.g. ofl)")
-    download_parser.add_argument("--part2", help="Google Fonts family (e.g. roboto)")
-    download_parser.add_argument("--font-name", help="Google Fonts file name")
 
-    subparsers.add_parser(
-        "layouts",
-        help="List available layouts as a table",
+@app.command(help="List available layouts as a table")
+def layouts() -> int:
+    return _run_layouts()
+
+
+@config_app.callback()
+def config(
+    ctx: typer.Context,
+    use_local_config: LocalOption = False,
+    use_global_config: GlobalOption = False,
+) -> int | None:
+    if ctx.invoked_subcommand is not None:
+        return None
+    return _run_config_show(
+        use_local_config=use_local_config,
+        use_global_config=use_global_config,
     )
 
-    config_parser = subparsers.add_parser(
-        "config",
-        help="Show or manage btcticker config files",
-    )
-    _add_scope_options(config_parser, include_config_path=False)
-    config_subparsers = config_parser.add_subparsers(dest="config_action")
 
-    config_edit_parser = config_subparsers.add_parser(
-        "edit",
-        help="Open selected config file in editor",
+@config_app.command("edit", help="Open selected config file in editor")
+def config_edit(
+    use_local_config: LocalOption = False,
+    use_global_config: GlobalOption = False,
+) -> int:
+    return _run_config_edit(
+        use_local_config=use_local_config,
+        use_global_config=use_global_config,
     )
-    _add_scope_options(config_edit_parser, include_config_path=False)
 
-    config_create_parser = config_subparsers.add_parser(
-        "create",
-        help="Create selected config file with defaults",
+
+@config_app.command("create", help="Create selected config file with defaults")
+def config_create(
+    use_local_config: LocalOption = False,
+    use_global_config: GlobalOption = False,
+) -> int:
+    return _run_config_create(
+        use_local_config=use_local_config,
+        use_global_config=use_global_config,
     )
-    _add_scope_options(config_create_parser, include_config_path=False)
-
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
     try:
-        if args.command == "text":
-            return _run_text(args)
-        if args.command == "image":
-            return _run_image(args)
-        if args.command == "download":
-            return _run_download(args)
-        if args.command == "layouts":
-            return _run_layouts(args)
-        if args.command == "config":
-            return _run_config(args)
-        parser.print_help()
-        return 1
+        result = app(
+            args=argv,
+            prog_name="btcticker",
+            standalone_mode=False,
+        )
+        return 0 if result is None else int(result)
+    except click.exceptions.Exit as exc:
+        raise SystemExit(exc.exit_code) from exc
+    except click.ClickException as exc:
+        exc.show(file=sys.stderr)
+        raise SystemExit(exc.exit_code) from exc
+    except SystemExit:
+        raise
     except Exception as exc:
-        parser.exit(status=1, message=f"Error: {exc}\n")
+        _console(stderr=True).print(
+            f"Error: {exc}",
+            highlight=False,
+            markup=False,
+        )
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

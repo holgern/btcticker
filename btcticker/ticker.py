@@ -34,6 +34,7 @@ from btcticker.layouts.common import (
     price_change_string as format_price_change_string,
 )
 from btcticker.mempool import Mempool
+from btcticker.providers import PyCCXTPriceProvider
 from btcticker.render import ImageRenderer
 
 
@@ -51,9 +52,12 @@ class Ticker:
         image=None,
         renderer=None,
     ):
-        provider = price_provider or price
-        if provider is None:
-            raise ValueError("Ticker requires an injected price provider")
+        provider = self._resolve_price_provider(
+            config=config,
+            days_ago=days_ago,
+            price_provider=price_provider,
+            price=price,
+        )
 
         self.config = config
         self.height = height
@@ -75,6 +79,40 @@ class Ticker:
         self.inverted = config.main.inverted
         self.orientation = config.main.orientation
         self.set_days_ago(days_ago)
+
+    @staticmethod
+    def _derive_symbol(config):
+        return config.main.symbol or f"BTC/{config.main.fiat.upper()}"
+
+    @classmethod
+    def _build_default_price_provider(cls, config, days_ago, provider_name=None):
+        resolved_provider = provider_name or getattr(
+            config.main, "price_provider", "pyccxt"
+        )
+        resolved_provider = str(resolved_provider).strip().lower()
+        if resolved_provider != "pyccxt":
+            raise ValueError(
+                f"Unknown price provider '{resolved_provider}'. Available providers: pyccxt"
+            )
+
+        return PyCCXTPriceProvider(
+            exchange_name=config.main.exchange,
+            fiat_symbol=cls._derive_symbol(config),
+            usd_symbol=config.main.usd_symbol or "BTC/USD",
+            interval=config.main.interval,
+            days_ago=days_ago,
+            enable_ohlc=config.main.enable_ohlc,
+            timeout_ms=config.main.ccxt_timeout,
+            min_refresh_time=config.main.price_refresh_seconds,
+        )
+
+    @classmethod
+    def _resolve_price_provider(cls, config, days_ago, price_provider=None, price=None):
+        if price_provider is not None and not isinstance(price_provider, str):
+            return price_provider
+        if price is not None:
+            return price
+        return cls._build_default_price_provider(config, days_ago, price_provider)
 
     def _provider(self):
         provider = getattr(self, "price_provider", None) or getattr(self, "price", None)

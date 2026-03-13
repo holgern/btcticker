@@ -99,6 +99,80 @@ def ticker_module(monkeypatch):
     return _load_ticker_module(monkeypatch)
 
 
+def test_ticker_builds_pyccxt_provider_when_none_injected(ticker_module, monkeypatch):
+    calls = {}
+
+    class FakeProvider:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+            self.days_ago = kwargs["days_ago"]
+            self.min_refresh_time = kwargs["min_refresh_time"]
+
+        def set_days_ago(self, days_ago):
+            calls["set_days_ago"] = days_ago
+            self.days_ago = days_ago
+
+        def refresh(self):
+            return None
+
+        def get_price_now(self):
+            return "0"
+
+        def get_price_change(self):
+            return "0%"
+
+        def get_timeseries_list(self):
+            return [0.0]
+
+        def get_ohlc_history(self):
+            return []
+
+        def get_snapshot(self):
+            return None
+
+    monkeypatch.setattr(ticker_module, "PyCCXTPriceProvider", FakeProvider)
+
+    config = SimpleNamespace(
+        main=SimpleNamespace(
+            fiat="eur",
+            symbol="",
+            usd_symbol="BTC/USD",
+            exchange="kraken",
+            interval="1h",
+            enable_ohlc=True,
+            ccxt_timeout=30000,
+            price_refresh_seconds=10,
+            mempool_api_url="https://mempool.space/api",
+            inverted=False,
+            orientation=0,
+            price_provider="pyccxt",
+        )
+    )
+    renderer = SimpleNamespace(font_manager="fonts", image="image")
+
+    ticker = ticker_module.Ticker(
+        config,
+        264,
+        176,
+        days_ago=3,
+        mempool=SimpleNamespace(),
+        renderer=renderer,
+    )
+
+    assert calls["init"] == {
+        "exchange_name": "kraken",
+        "fiat_symbol": "BTC/EUR",
+        "usd_symbol": "BTC/USD",
+        "interval": "1h",
+        "days_ago": 3,
+        "enable_ohlc": True,
+        "timeout_ms": 30000,
+        "min_refresh_time": 10,
+    }
+    assert calls["set_days_ago"] == 3
+    assert ticker.price_provider is ticker.price
+
+
 def _make_ticker(ticker_module, show_best_fees=True, show_block_time=False):
     ticker = ticker_module.Ticker.__new__(ticker_module.Ticker)
 

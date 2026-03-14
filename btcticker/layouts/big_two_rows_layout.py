@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from btcticker.domain.market_snapshot import MarketSnapshot
 from btcticker.layouts.common import (
     compute_mempool_metrics,

@@ -346,7 +346,7 @@ def test_layout_generators_cover_mode_matrix(
     actual = getattr(ticker, generator_name)(mode)
 
     assert len(actual) == len(expected)
-    for actual_part, expected_part in zip(actual, expected):
+    for actual_part, expected_part in zip(actual, expected, strict=True):
         assert expected_part in actual_part
 
 

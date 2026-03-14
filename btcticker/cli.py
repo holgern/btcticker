@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable, Iterable
 from configparser import ConfigParser
 from pathlib import Path
-from typing import Annotated, Any, Protocol, cast
+from typing import Annotated, Any, Optional, Protocol, cast
 
 import click
 import typer
@@ -91,7 +91,7 @@ LAYOUT_SPECS = {
 DEFAULT_CONSOLE_WIDTH = 200
 
 ConfigPathOption = Annotated[
-    str | None,
+    Optional[str],
     typer.Option("--config", help="Path to config.ini"),
 ]
 LocalOption = Annotated[
@@ -152,7 +152,7 @@ def _resolve_default_config_path() -> Path:
 
 
 def _resolve_config_path(
-    selected_path: str | None,
+    selected_path: Optional[str],
     use_local: bool,
     use_global: bool,
     *,
@@ -186,7 +186,7 @@ def _select_from_list(values: Iterable[str], index: int, fallback: str) -> str:
     return value_list[normalized_index]
 
 
-def _resolve_mode(config: Config, selected_mode: str | None) -> str:
+def _resolve_mode(config: Config, selected_mode: Optional[str]) -> str:
     if selected_mode:
         return selected_mode
     return _select_from_list(
@@ -196,7 +196,7 @@ def _resolve_mode(config: Config, selected_mode: str | None) -> str:
     )
 
 
-def _resolve_layout(config: Config, selected_layout: str | None) -> str:
+def _resolve_layout(config: Config, selected_layout: Optional[str]) -> str:
     if selected_layout:
         return selected_layout
     return _select_from_list(
@@ -206,7 +206,7 @@ def _resolve_layout(config: Config, selected_layout: str | None) -> str:
     )
 
 
-def _resolve_days(config: Config, selected_days: int | None) -> int:
+def _resolve_days(config: Config, selected_days: Optional[int]) -> int:
     if selected_days is not None:
         return selected_days
 
@@ -448,12 +448,12 @@ def _run_config_edit(*, use_local_config: bool, use_global_config: bool) -> int:
 
 def _run_text(
     *,
-    config: str | None,
+    config: Optional[str],
     use_local_config: bool,
     use_global_config: bool,
-    layout: str | None,
-    mode: str | None,
-    days: int | None,
+    layout: Optional[str],
+    mode: Optional[str],
+    days: Optional[int],
     width: int,
     line_spacing: int,
     no_center: bool,
@@ -494,12 +494,12 @@ def _run_text(
 
 def _run_image(
     *,
-    config: str | None,
+    config: Optional[str],
     use_local_config: bool,
     use_global_config: bool,
-    layout: str | None,
-    mode: str | None,
-    days: int | None,
+    layout: Optional[str],
+    mode: Optional[str],
+    days: Optional[int],
     output: str,
 ) -> int:
     config_path = _resolve_config_path(
@@ -526,11 +526,11 @@ def _run_image(
 
 def _run_download(
     *,
-    fontdir: str | None,
-    url: str | None,
-    part1: str | None,
-    part2: str | None,
-    font_name: str | None,
+    fontdir: Optional[str],
+    url: Optional[str],
+    part1: Optional[str],
+    part2: Optional[str],
+    font_name: Optional[str],
 ) -> int:
     from piltext import FontManager
 
@@ -588,13 +588,13 @@ def text(
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
     layout: Annotated[
-        str | None, typer.Option("--layout", help="Layout to render")
+        Optional[str], typer.Option("--layout", help="Layout to render")
     ] = None,
     mode: Annotated[
-        str | None, typer.Option("--mode", help="Ticker mode to render")
+        Optional[str], typer.Option("--mode", help="Ticker mode to render")
     ] = None,
     days: Annotated[
-        int | None, typer.Option("--days", help="Days ago for price history")
+        Optional[int], typer.Option("--days", help="Days ago for price history")
     ] = None,
     width: Annotated[int, typer.Option("--width", help="Output width")] = 80,
     line_spacing: Annotated[
@@ -630,13 +630,13 @@ def image(
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
     layout: Annotated[
-        str | None, typer.Option("--layout", help="Layout to render")
+        Optional[str], typer.Option("--layout", help="Layout to render")
     ] = None,
     mode: Annotated[
-        str | None, typer.Option("--mode", help="Ticker mode to render")
+        Optional[str], typer.Option("--mode", help="Ticker mode to render")
     ] = None,
     days: Annotated[
-        int | None, typer.Option("--days", help="Days ago for price history")
+        Optional[int], typer.Option("--days", help="Days ago for price history")
     ] = None,
     output: Annotated[
         str,
@@ -661,25 +661,25 @@ def image(
 @app.command(help="Download fonts to user font storage")
 def download(
     fontdir: Annotated[
-        str | None,
+        Optional[str],
         typer.Option(
             "--fontdir",
             help="Custom font directory (defaults to piltext user directory)",
         ),
     ] = None,
     url: Annotated[
-        str | None, typer.Option("--url", help="Direct URL to a font file")
+        Optional[str], typer.Option("--url", help="Direct URL to a font file")
     ] = None,
     part1: Annotated[
-        str | None,
+        Optional[str],
         typer.Option("--part1", help="Google Fonts category (e.g. ofl)"),
     ] = None,
     part2: Annotated[
-        str | None,
+        Optional[str],
         typer.Option("--part2", help="Google Fonts family (e.g. roboto)"),
     ] = None,
     font_name: Annotated[
-        str | None,
+        Optional[str],
         typer.Option("--font-name", help="Google Fonts file name"),
     ] = None,
 ) -> int:
@@ -702,7 +702,7 @@ def config(
     ctx: typer.Context,
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
-) -> int | None:
+) -> Optional[int]:
     if ctx.invoked_subcommand is not None:
         return None
     return _run_config_show(
@@ -733,7 +733,7 @@ def config_create(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     try:
         result = app(
             args=argv,

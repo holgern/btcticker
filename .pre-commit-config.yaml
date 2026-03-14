@@ -22,8 +22,8 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.6
     hooks:
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix, --config=.ruff.toml]
+      - id: ruff-check
+        args: [--fix]
       - id: ruff-format
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

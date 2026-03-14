@@ -369,10 +369,11 @@ def test_fiat_height_uses_usd_specific_variant_when_fiat_is_usd(ticker_module):
     ticker, _ = _make_ticker(ticker_module)
 
     line_str = ticker.generate_fiat_height("fiat")
+    expected_last_block_time = datetime.fromtimestamp(1700000000).strftime("%H:%M")
 
     assert line_str[0] == "840000"
     assert line_str[1] == "Fees: L 1.2 M 2.3 H 3.4"
-    assert line_str[2].startswith("672 blk -12.5 % | 23:13 -")
+    assert line_str[2].startswith(f"672 blk -12.5 % | {expected_last_block_time} -")
     assert line_str[3] == "/$2400"
     assert line_str[4] == "$43567"
 

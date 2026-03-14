@@ -161,6 +161,72 @@ def test_text_command_uses_config_selected_layout(monkeypatch, capsys, tmp_path)
     assert capsys.readouterr().out.strip() == "text output"
 
 
+def test_text_command_accepts_root_config_option(monkeypatch, capsys, tmp_path):
+    call_data = _install_fake_piltext(monkeypatch, rendered_output="text output")
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "my-config.ini"
+    config_path.write_text("[Main]\n\n[Fonts]\n", encoding="utf-8")
+
+    ticker_data = {}
+    provider = object()
+
+    class FakeTicker:
+        def __init__(self, config, width, height, price_provider=None):
+            ticker_data["width"] = width
+            ticker_data["height"] = height
+            ticker_data["price_provider"] = price_provider
+
+        def set_days_ago(self, days_ago):
+            ticker_data["days_ago"] = days_ago
+
+        def refresh(self):
+            ticker_data["refreshed"] = True
+
+        def generate_fiat(self, mode):
+            ticker_data["mode"] = mode
+            return ["line a", "line b"]
+
+    fake_ticker_module = types.ModuleType("btcticker.ticker")
+    fake_ticker_module.Ticker = FakeTicker
+    monkeypatch.setitem(sys.modules, "btcticker.ticker", fake_ticker_module)
+
+    class FakeConfig:
+        def __init__(self, path):
+            assert path == str(config_path)
+            self.main = SimpleNamespace(
+                mode_list="fiat,usd",
+                start_mode_ind=1,
+                layout_list="all,fiat",
+                start_layout_ind=1,
+                days_list="1,3,7",
+                start_days_ind=2,
+                epd_type="2in7_V2",
+                orientation=0,
+            )
+
+    monkeypatch.setattr(cli, "Config", FakeConfig)
+    monkeypatch.setattr(cli, "build_price_provider", lambda config, days_ago: provider)
+
+    exit_code = cli.main(["--config", str(config_path), "text", "--line-spacing", "0"])
+
+    assert exit_code == 0
+    assert ticker_data == {
+        "width": 264,
+        "height": 176,
+        "price_provider": provider,
+        "days_ago": 7,
+        "refreshed": True,
+        "mode": "usd",
+    }
+    assert call_data == {
+        "texts": ["line a", "line b"],
+        "width": 80,
+        "line_spacing": 0,
+        "center": True,
+    }
+    assert capsys.readouterr().out.strip() == "text output"
+
+
 def test_download_command_downloads_default_set(monkeypatch, capsys):
     _install_fake_piltext(monkeypatch)
     monkeypatch.setattr(cli, "ensure_default_fonts", lambda _: ["A.ttf", "B.ttf"])
@@ -172,6 +238,18 @@ def test_download_command_downloads_default_set(monkeypatch, capsys):
     assert "Downloaded default btcticker fonts" in output
     assert "- A.ttf" in output
     assert "- B.ttf" in output
+
+
+def test_download_command_accepts_root_config_option(monkeypatch, capsys):
+    _install_fake_piltext(monkeypatch)
+    monkeypatch.setattr(cli, "ensure_default_fonts", lambda _: ["A.ttf"])
+
+    exit_code = cli.main(["--config", "missing.ini", "download"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Downloaded default btcticker fonts" in output
+    assert "- A.ttf" in output
 
 
 def test_download_command_downloads_custom_google_font(monkeypatch, capsys):
@@ -304,6 +382,16 @@ def test_config_command_global_scope_shows_path(monkeypatch, tmp_path, capsys):
     assert "source" in output
 
 
+def test_config_command_uses_root_config_option(tmp_path, capsys):
+    config_path = tmp_path / "custom.ini"
+
+    exit_code = cli.main(["--config", str(config_path), "config"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert f"Config path: {config_path}" in output
+
+
 def test_config_command_local_scope_fails_when_missing(monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
 
@@ -360,6 +448,54 @@ def test_config_edit_uses_default_editor(monkeypatch, tmp_path):
     assert exit_code == 0
     assert calls["check"] is False
     assert calls["command"] == ["fake-editor", "--wait", str(local_config)]
+
+
+def test_config_edit_accepts_root_config_option(monkeypatch, tmp_path):
+    config_path = tmp_path / "custom.ini"
+    config_path.write_text("[Main]\n\n[Fonts]\n", encoding="utf-8")
+    monkeypatch.setenv("VISUAL", "")
+    monkeypatch.setenv("EDITOR", "fake-editor --wait")
+
+    calls = {}
+
+    def fake_run(command, check):
+        calls["command"] = command
+        calls["check"] = check
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    exit_code = cli.main(["--config", str(config_path), "config", "edit"])
+
+    assert exit_code == 0
+    assert calls["check"] is False
+    assert calls["command"] == ["fake-editor", "--wait", str(config_path)]
+
+
+def test_root_and_command_config_options_cannot_be_combined(
+    monkeypatch, tmp_path, capsys
+):
+    _install_fake_piltext(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "custom.ini"
+    config_path.write_text("[Main]\n\n[Fonts]\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "text",
+                "--local",
+                "--layout",
+                "fiat",
+                "--mode",
+                "fiat",
+            ]
+        )
+
+    assert exc.value.code == 1
+    assert "Use only one of --config, --local, or --global" in capsys.readouterr().err
 
 
 def test_image_command_writes_default_output(monkeypatch, tmp_path, capsys):

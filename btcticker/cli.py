@@ -5,6 +5,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from configparser import ConfigParser
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
 
@@ -101,6 +102,14 @@ GlobalOption = Annotated[
     typer.Option("--global", help=f"Use global ~/{GLOBAL_CONFIG_SUFFIX}"),
 ]
 
+
+@dataclass(frozen=True)
+class ConfigSelection:
+    selected_path: str | None = None
+    use_local: bool = False
+    use_global: bool = False
+
+
 app = typer.Typer(pretty_exceptions_enable=False)
 config_app = typer.Typer(
     help="Show or manage btcticker config files",
@@ -147,6 +156,45 @@ def _resolve_default_config_path() -> Path:
     if local_path.exists():
         return local_path
     return _get_global_config_path()
+
+
+def _config_selection(
+    selected_path: str | None,
+    use_local: bool,
+    use_global: bool,
+) -> ConfigSelection:
+    return ConfigSelection(
+        selected_path=selected_path,
+        use_local=use_local,
+        use_global=use_global,
+    )
+
+
+def _context_config_selection(ctx: typer.Context | None) -> ConfigSelection:
+    current_ctx = ctx
+    while current_ctx is not None:
+        if isinstance(current_ctx.obj, ConfigSelection):
+            return current_ctx.obj
+        current_ctx = current_ctx.parent
+    return ConfigSelection()
+
+
+def _merge_config_selections(*selections: ConfigSelection) -> ConfigSelection:
+    selected_path_count = sum(
+        selection.selected_path is not None for selection in selections
+    )
+    use_local_count = sum(selection.use_local for selection in selections)
+    use_global_count = sum(selection.use_global for selection in selections)
+    if selected_path_count + use_local_count + use_global_count > 1:
+        raise ValueError("Use only one of --config, --local, or --global")
+
+    for selection in selections:
+        if selection.selected_path is not None:
+            return selection
+        if selection.use_local or selection.use_global:
+            return selection
+
+    return ConfigSelection()
 
 
 def _resolve_config_path(
@@ -382,9 +430,14 @@ def _config_value_rows(config_path: Path) -> list[list[str]]:
     return rows
 
 
-def _run_config_show(*, use_local_config: bool, use_global_config: bool) -> int:
+def _run_config_show(
+    *,
+    config: str | None,
+    use_local_config: bool,
+    use_global_config: bool,
+) -> int:
     config_path = _resolve_config_path(
-        selected_path=None,
+        selected_path=config,
         use_local=use_local_config,
         use_global=use_global_config,
         require_exists=False,
@@ -406,9 +459,14 @@ def _run_config_show(*, use_local_config: bool, use_global_config: bool) -> int:
     return 0
 
 
-def _run_config_create(*, use_local_config: bool, use_global_config: bool) -> int:
+def _run_config_create(
+    *,
+    config: str | None,
+    use_local_config: bool,
+    use_global_config: bool,
+) -> int:
     config_path = _resolve_config_path(
-        selected_path=None,
+        selected_path=config,
         use_local=use_local_config,
         use_global=use_global_config,
         require_exists=False,
@@ -428,9 +486,14 @@ def _run_config_create(*, use_local_config: bool, use_global_config: bool) -> in
     return 0
 
 
-def _run_config_edit(*, use_local_config: bool, use_global_config: bool) -> int:
+def _run_config_edit(
+    *,
+    config: str | None,
+    use_local_config: bool,
+    use_global_config: bool,
+) -> int:
     config_path = _resolve_config_path(
-        selected_path=None,
+        selected_path=config,
         use_local=use_local_config,
         use_global=use_global_config,
         require_exists=True,
@@ -580,8 +643,19 @@ def _run_download(
     return 0
 
 
+@app.callback()
+def app_callback(
+    ctx: typer.Context,
+    config: ConfigPathOption = None,
+    use_local_config: LocalOption = False,
+    use_global_config: GlobalOption = False,
+) -> None:
+    ctx.obj = _config_selection(config, use_local_config, use_global_config)
+
+
 @app.command(help="Render ticker text output for a layout")
 def text(
+    ctx: typer.Context,
     config: ConfigPathOption = None,
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
@@ -608,10 +682,14 @@ def text(
         typer.Option("--header", help="Show layout/mode header before output"),
     ] = False,
 ) -> int:
+    selection = _merge_config_selections(
+        _context_config_selection(ctx),
+        _config_selection(config, use_local_config, use_global_config),
+    )
     return _run_text(
-        config=config,
-        use_local_config=use_local_config,
-        use_global_config=use_global_config,
+        config=selection.selected_path,
+        use_local_config=selection.use_local,
+        use_global_config=selection.use_global,
         layout=layout,
         mode=mode,
         days=days,
@@ -624,6 +702,7 @@ def text(
 
 @app.command(help="Render and save ticker as PNG image")
 def image(
+    ctx: typer.Context,
     config: ConfigPathOption = None,
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
@@ -645,10 +724,14 @@ def image(
         ),
     ] = "btcticker.png",
 ) -> int:
+    selection = _merge_config_selections(
+        _context_config_selection(ctx),
+        _config_selection(config, use_local_config, use_global_config),
+    )
     return _run_image(
-        config=config,
-        use_local_config=use_local_config,
-        use_global_config=use_global_config,
+        config=selection.selected_path,
+        use_local_config=selection.use_local,
+        use_global_config=selection.use_global,
         layout=layout,
         mode=mode,
         days=days,
@@ -701,33 +784,51 @@ def config(
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
 ) -> int | None:
+    selection = _merge_config_selections(
+        _context_config_selection(ctx),
+        _config_selection(None, use_local_config, use_global_config),
+    )
+    ctx.obj = selection
     if ctx.invoked_subcommand is not None:
         return None
     return _run_config_show(
-        use_local_config=use_local_config,
-        use_global_config=use_global_config,
+        config=selection.selected_path,
+        use_local_config=selection.use_local,
+        use_global_config=selection.use_global,
     )
 
 
 @config_app.command("edit", help="Open selected config file in editor")
 def config_edit(
+    ctx: typer.Context,
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
 ) -> int:
+    selection = _merge_config_selections(
+        _context_config_selection(ctx),
+        _config_selection(None, use_local_config, use_global_config),
+    )
     return _run_config_edit(
-        use_local_config=use_local_config,
-        use_global_config=use_global_config,
+        config=selection.selected_path,
+        use_local_config=selection.use_local,
+        use_global_config=selection.use_global,
     )
 
 
 @config_app.command("create", help="Create selected config file with defaults")
 def config_create(
+    ctx: typer.Context,
     use_local_config: LocalOption = False,
     use_global_config: GlobalOption = False,
 ) -> int:
+    selection = _merge_config_selections(
+        _context_config_selection(ctx),
+        _config_selection(None, use_local_config, use_global_config),
+    )
     return _run_config_create(
-        use_local_config=use_local_config,
-        use_global_config=use_global_config,
+        config=selection.selected_path,
+        use_local_config=selection.use_local,
+        use_global_config=selection.use_global,
     )
 
 

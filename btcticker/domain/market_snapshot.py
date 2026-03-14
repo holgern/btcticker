@@ -1,3 +1,4 @@
+import sys
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,8 +7,9 @@ from typing import Any
 
 from btcticker.domain.price_snapshot import PriceSnapshot
 
+DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class MarketSnapshot:
     price_snapshot: PriceSnapshot
     mempool: dict[str, Any]

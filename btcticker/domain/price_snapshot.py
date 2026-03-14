@@ -1,10 +1,12 @@
 from __future__ import annotations
+import sys
 
 from dataclasses import dataclass
 from datetime import datetime
 
+DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class PriceSnapshot:
     fiat: str
     fiat_price: float | None

@@ -1,17 +1,18 @@
 from __future__ import annotations
-
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class PriceHistoryPoint:
     timestamp: datetime | None
     price: float
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class OHLCPoint:
     timestamp: datetime | None
     open: float
@@ -31,7 +32,7 @@ class OHLCPoint:
         }
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class PriceHistory:
     prices: list[PriceHistoryPoint] = field(default_factory=list)
     ohlc: list[OHLCPoint] = field(default_factory=list)

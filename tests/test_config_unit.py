@@ -1,4 +1,5 @@
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +31,49 @@ def test_config_reads_values_from_ini(tmp_path):
     assert config.main.start_mode_ind == 2
     assert config.fonts.font_buttom == "Demo-Regular.ttf"
     assert config.fonts.font_side_size == 22
+    assert config.resolved_font_dir is None
+
+
+def test_config_resolves_relative_font_dir_from_config_location(tmp_path):
+    config_dir = tmp_path / "settings"
+    config_dir.mkdir()
+    config_path = config_dir / "config.ini"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            [Main]
+
+            [Fonts]
+            font_dir = fonts
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    config = Config(path=str(config_path))
+
+    assert config.fonts.font_dir == "fonts"
+    assert config.resolved_font_dir == (config_dir / "fonts").resolve()
+
+
+def test_config_preserves_absolute_font_dir(tmp_path):
+    font_dir = (tmp_path / "shared-fonts").resolve()
+    config_path = tmp_path / "config.ini"
+    config_path.write_text(
+        textwrap.dedent(
+            f"""
+            [Main]
+
+            [Fonts]
+            font_dir = {font_dir}
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    config = Config(path=str(config_path))
+
+    assert config.resolved_font_dir == Path(font_dir)
 
 
 def test_config_raises_when_file_is_missing(tmp_path):

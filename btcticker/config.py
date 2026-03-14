@@ -1,4 +1,5 @@
 from configparser import ConfigParser
+from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -60,6 +61,7 @@ class MainConfig(BaseModel):
 class FontsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    font_dir: str = ""
     font_buttom: str = "Audiowide-Regular.ttf"
     font_console: str = "ZenDots-Regular.ttf"
     font_big: str = "BigShouldersDisplay[wght].ttf"
@@ -70,22 +72,42 @@ class FontsConfig(BaseModel):
     font_fee: str = "Audiowide-Regular.ttf"
     font_fee_size: int = 14
 
+    @field_validator("font_dir", mode="before")
+    @classmethod
+    def _normalize_font_dir(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
 
 ConfigSection = TypeVar("ConfigSection", bound=BaseModel)
 
 
 class Config:
     def __init__(self, path: str = "config.ini") -> None:
+        self.path = Path(path).expanduser()
         self.__config = ConfigParser()
-        parsed_files = self.__config.read(path)
+        parsed_files = self.__config.read(self.path)
         if not parsed_files:
             raise ConfigurationException(f"Config file not found: {path}")
+
+        self.path = self.path.resolve()
 
         self.main = self._load_section("Main", MainConfig)
         self.fonts = self._load_section("Fonts", FontsConfig)
 
     def has_option(self, section_name: str, option_name: str) -> bool:
         return self.__config.has_option(section_name, option_name)
+
+    @property
+    def resolved_font_dir(self) -> Path | None:
+        raw_font_dir = self.fonts.font_dir.strip()
+        if not raw_font_dir:
+            return None
+        font_dir = Path(raw_font_dir).expanduser()
+        if font_dir.is_absolute():
+            return font_dir
+        return (self.path.parent / font_dir).resolve()
 
     def _load_section(
         self,

@@ -56,12 +56,16 @@ class ImageRenderer:
         self.height = height
 
         if font_manager is None:
+            font_manager_kwargs: dict[str, Any] = {
+                "default_font_size": 20,
+                "default_font_name": config.fonts.font_side,
+            }
+            resolved_font_dir = config.resolved_font_dir
+            if resolved_font_dir is not None:
+                font_manager_kwargs["fontdirs"] = str(resolved_font_dir)
             self.font_manager: FontManagerLike = cast(
                 FontManagerLike,
-                FontManager(
-                    default_font_size=20,
-                    default_font_name=config.fonts.font_side,
-                ),
+                FontManager(**font_manager_kwargs),
             )
             ensure_default_fonts(self.font_manager)
         else:

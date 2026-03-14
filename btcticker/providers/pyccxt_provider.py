@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from btcticker.domain.price_snapshot import PriceSnapshot
 from btcticker.providers._pyccxt_compat import (
@@ -139,7 +139,7 @@ class PyCCXTPriceProvider:
         return exchange
 
     def _get_market(self, symbol: str, required: bool = True) -> Market | None:
-        market = cast(Market | None, self._exchange.get_market(symbol))
+        market = cast(Optional[Market], self._exchange.get_market(symbol))
         if market is None and required:
             raise PriceMarketNotFoundError(
                 f"Market '{symbol}' not found on exchange '{self.exchange_name}'"

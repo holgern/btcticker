@@ -1,10 +1,11 @@
 from __future__ import annotations
-import sys
 
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 
 DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
+
 
 @dataclass(**DATACLASS_KWARGS)
 class PriceSnapshot:

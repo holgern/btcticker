@@ -1,6 +1,7 @@
 from __future__ import annotations
-import sys
+
 import math
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -8,7 +9,9 @@ from typing import Any
 from babel import numbers
 
 from btcticker.domain.market_snapshot import MarketSnapshot
+
 DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
+
 
 @dataclass(**DATACLASS_KWARGS)
 class MempoolMetrics:

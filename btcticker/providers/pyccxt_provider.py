@@ -171,7 +171,8 @@ class PyCCXTPriceProvider:
     def _fetch_price_history(self) -> list[float]:
         if self._fiat_market is None:
             raise PriceMarketNotFoundError(
-                f"Market '{self.fiat_symbol}' not found on exchange '{self.exchange_name}'"
+                f"Market '{self.fiat_symbol}' not found on "
+                f"exchange '{self.exchange_name}'"
             )
 
         fiat_market = self._fiat_market

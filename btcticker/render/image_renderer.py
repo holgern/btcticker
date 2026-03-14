@@ -3,13 +3,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Protocol, cast
 
-from piltext import FontManager, ImageDrawer, TextGrid
 from PIL import Image
+from piltext import FontManager, ImageDrawer, TextGrid
 
 from btcticker.chart import makeCandle, makeSpark
 from btcticker.config import Config
-from btcticker.font_sources import FontManagerLike
-from btcticker.font_sources import ensure_default_fonts
+from btcticker.font_sources import FontManagerLike, ensure_default_fonts
 
 
 class ImageHandlerLike(Protocol):

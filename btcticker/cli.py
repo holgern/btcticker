@@ -5,10 +5,9 @@ import shlex
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from configparser import ConfigParser
 from pathlib import Path
-from collections.abc import Callable
 from typing import Annotated, Any, Protocol, cast
 
 import click
